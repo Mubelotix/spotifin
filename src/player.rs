@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
@@ -8,9 +9,16 @@ use crate::bridge::{eval_on_bridge, BridgeState};
 /// Serializes playback switches so concurrent audio requests (clients open
 /// several connections per track) do not fight over the recorder.
 #[derive(Default)]
-pub struct PlayerControl {
+struct PlayerInner {
     last_item: Mutex<Option<uuid::Uuid>>,
     session: Mutex<Option<CaptureSession>>,
+    last_activity: StdMutex<Option<Instant>>,
+    idle_paused: StdMutex<bool>,
+}
+
+#[derive(Clone, Default)]
+pub struct PlayerControl {
+    inner: Arc<PlayerInner>,
 }
 
 /// Bounds an audio response to the requested track's lifetime: the stream
@@ -28,9 +36,55 @@ pub struct CaptureSession {
 impl PlayerControl {
     /// Capture plan for `item`, if it is the one being recorded.
     pub async fn session_for(&self, item: uuid::Uuid) -> Option<CaptureSession> {
-        match self.session.lock().await.as_ref() {
+        match self.inner.session.lock().await.as_ref() {
             Some(session) if session.item == item => Some(*session),
             _ => None,
+        }
+    }
+
+    /// True while some requested track may still be sounding: pausing would
+    /// cut a capture short.
+    async fn capture_in_progress(&self) -> bool {
+        match self.inner.session.lock().await.as_ref() {
+            Some(session) => Instant::now() < session.min_end,
+            None => false,
+        }
+    }
+
+    fn note_activity(&self) {
+        *self.inner.last_activity.lock().unwrap() = Some(Instant::now());
+        *self.inner.idle_paused.lock().unwrap() = false;
+    }
+
+    /// Long-idle watchdog: pauses the client once no Jellyfin client has asked
+    /// for audio for `timeout`, but never mid-capture (pauses land at song
+    /// boundaries by construction).
+    pub async fn idle_watchdog(
+        bridge: BridgeState,
+        control: PlayerControl,
+        timeout: Duration,
+    ) {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let last = *control.inner.last_activity.lock().unwrap();
+            let Some(last) = last else { continue };
+            if last.elapsed() < timeout || control.capture_in_progress().await {
+                continue;
+            }
+            // Pausing alone loses the race against autoplay advancing between
+            // tracks; draining the queue leaves the client with nothing to
+            // roll on to.
+            let already_paused = *control.inner.idle_paused.lock().unwrap();
+            match eval_on_bridge(
+                &bridge,
+                "Spicetify.Platform.PlayerAPI.clearQueue(); Spicetify.Player.pause(); \"paused\"".to_string(),
+            )
+            .await
+            {
+                Ok(_) if !already_paused => eprintln!("playback paused after {}s idle", timeout.as_secs()),
+                Ok(_) => {}
+                Err(error) => eprintln!("idle pause failed: {error}"),
+            }
         }
     }
 }
@@ -89,6 +143,7 @@ async fn wait_recorder_restarted(path: &std::path::Path, previous_len: u64) {
 /// client, resets the recorder and opens a capture session so audio responses
 /// end with the song. Unknown items stream whatever is playing.
 pub async fn prepare(state: &crate::AppState, item_id: uuid::Uuid, recording: &std::path::Path) {
+    state.player.note_activity();
     let (uri, duration_ms) = {
         let catalog = state.catalog.read().unwrap();
         match catalog.tracks.get(&item_id) {
@@ -100,7 +155,7 @@ pub async fn prepare(state: &crate::AppState, item_id: uuid::Uuid, recording: &s
         return;
     };
 
-    let mut last = state.player.last_item.lock().await;
+    let mut last = state.player.inner.last_item.lock().await;
     let still_capturing = state
         .player
         .session_for(item_id)
@@ -118,7 +173,7 @@ pub async fn prepare(state: &crate::AppState, item_id: uuid::Uuid, recording: &s
             wait_recorder_restarted(recording, previous_len).await;
             let min_end = Instant::now() + Duration::from_millis(duration_ms);
             let expected_bytes = duration_ms / 1000 * 24_000;
-            *state.player.session.lock().await =
+            *state.player.inner.session.lock().await =
                 Some(CaptureSession { item: item_id, min_end, expected_bytes });
             *last = Some(item_id);
         }

@@ -81,6 +81,13 @@ async fn rocket() -> _ {
     }
 
     tokio::spawn(refresh_loop(state.bridge.clone(), state.catalog.clone()));
+    let idle_timeout = Duration::from_secs(
+        std::env::var("PLAYBACK_IDLE_TIMEOUT_SECS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(300),
+    );
+    tokio::spawn(player::PlayerControl::idle_watchdog(state.bridge.clone(), state.player.clone(), idle_timeout));
 
     // Clients append /api to the server URL; serve under both prefixes.
     rocket::build()
