@@ -37,20 +37,47 @@ RUN printf '%s\n' \
 
 # Init script (runs as root at boot): fix /config ownership (root-owned leftovers
 # prevent the Spotify window from ever mapping), clean locks, apply spicetify on first boot.
-# Spicetify refuses to run as root and files it touches must stay owned by abc.
+# Plugins are driven by the SPICETIFY_EXTENSIONS / SPICETIFY_CUSTOM_APPS / SPICETIFY_THEME
+# env vars (space-separated lists). Spicetify refuses to run as root and files it
+# touches must stay owned by abc.
 RUN mkdir -p /custom-cont-init.d \
     && printf '%s\n' \
         '#!/bin/bash' \
         'set -e' \
-        'chown -R abc:abc /config/.cache /config/.config /config/spicetify 2>/dev/null || true' \
+        'SPICETIFY_HOME=/config' \
+        'SPICETIFY_CONFIG=/config/spicetify' \
+        'CFG="$SPICETIFY_CONFIG/config-xpui.ini"' \
+        'chown -R abc:abc /config/.cache /config/.config "$SPICETIFY_CONFIG" 2>/dev/null || true' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
-        'mkdir -p /config/.config/spotify' \
+        'mkdir -p /config/.config/spotify "$SPICETIFY_CONFIG/Extensions"' \
         '[ -f /config/.config/spotify/prefs ] || touch /config/.config/spotify/prefs' \
         'chmod -R a+rwX /usr/share/spotify' \
-        'if [ ! -f /config/spicetify/config-xpui.ini ]; then' \
-        '    su abc -s /bin/bash -c "HOME=/config SPICETIFY_CONFIG=/config/spicetify spicetify backup apply" || true' \
+        'if [ ! -f "$CFG" ]; then' \
+        '    su abc -s /bin/bash -c "HOME=$SPICETIFY_HOME SPICETIFY_CONFIG=$SPICETIFY_CONFIG spicetify backup apply" || true' \
         'fi' \
-        'chown -R abc:abc /config/spicetify 2>/dev/null || true' \
+        '[ -f "$CFG" ] || exit 0' \
+        'join() { local IFS="|"; echo "$*"; }' \
+        'WANT_EXT=$(join $SPICETIFY_EXTENSIONS)' \
+        'WANT_APPS=$(join $SPICETIFY_CUSTOM_APPS)' \
+        'WANT_THEME="$SPICETIFY_THEME"' \
+        'case " $SPICETIFY_EXTENSIONS " in' \
+        '    *" adblock.js "*)' \
+        '        [ -f "$SPICETIFY_CONFIG/Extensions/adblock.js" ] || curl -fsSL -o "$SPICETIFY_CONFIG/Extensions/adblock.js" https://raw.githubusercontent.com/rxri/spicetify-extensions/main/adblock/adblock.js || true' \
+        '        ;;' \
+        'esac' \
+        'CHANGED=0' \
+        'for kv in "extensions $WANT_EXT" "custom_apps $WANT_APPS" "theme $WANT_THEME"; do' \
+        '    k=${kv%% *}; v=${kv#* }' \
+        '    CUR=$(grep -E "^$k[[:space:]]*=" "$CFG" | sed "s/^$k[[:space:]]*=//; s/^[[:space:]]*//" || true)' \
+        '    if [ "$CUR" != "$v" ]; then' \
+        '        sed -i "s~^$k[[:space:]]*=.*~$k               = $v~" "$CFG"' \
+        '        CHANGED=1' \
+        '    fi' \
+        'done' \
+        'chown -R abc:abc "$SPICETIFY_CONFIG" 2>/dev/null || true' \
+        'if [ "$CHANGED" = 1 ]; then' \
+        '    su abc -s /bin/bash -c "HOME=$SPICETIFY_HOME SPICETIFY_CONFIG=$SPICETIFY_CONFIG spicetify apply" || true' \
+        'fi' \
         > /custom-cont-init.d/50-spicetify-init.sh \
     && chmod +x /custom-cont-init.d/50-spicetify-init.sh

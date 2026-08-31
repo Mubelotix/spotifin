@@ -28,16 +28,20 @@ podman build -t spicetify-web .
 
 ## Spicetify plugins
 
-Config lives in `./data/spicetify/config-xpui.ini` (persisted). Enable plugins either by editing it directly (`extensions`, `custom_apps`, `theme` keys) or via the CLI:
+Plugins are configured with env vars in `run-spotify.sh` (space-separated lists), applied by the init script at every boot:
+
+- `SPICETIFY_EXTENSIONS` (default `adblock.js` — auto-downloaded from rxri/spicetify-extensions)
+- `SPICETIFY_CUSTOM_APPS` (e.g. `lyrics-plus new-releases`)
+- `SPICETIFY_THEME`
 
 ```bash
-# Must run as abc with HOME=/config — spicetify refuses root, and root-owned
-# output files cause the black-screen bug
-alias spicetify='podman exec -u abc -e HOME=/config -e SPICETIFY_CONFIG=/config/spicetify spotify spicetify'
+SPICETIFY_EXTENSIONS="adblock.js fullAppDisplay.js" SPICETIFY_CUSTOM_APPS="lyrics-plus" ./run-spotify.sh
+```
 
-spicetify config extensions fullAppDisplay.js   # quote names with '+' like "shuffle+.js"
-spicetify config custom_apps lyrics-plus
-spicetify apply
+The resulting config is persisted in `./data/spicetify/config-xpui.ini`. Manual CLI config also works but must run as abc with HOME=/config — spicetify refuses root, and root-owned output files cause the black-screen bug:
+
+```bash
+alias spicetify='podman exec -u abc -e HOME=/config -e SPICETIFY_CONFIG=/config/spicetify spotify spicetify'
 ```
 
 Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/spicetify/CustomApps/` (lyrics-plus, new-releases, reddit). More via the spicetify Marketplace.
