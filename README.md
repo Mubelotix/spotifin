@@ -1,25 +1,25 @@
 # Spotify MCP Client Compatibility
 
-| Feature | Finamp | Fintunes | Yuzic | CassetteCat | Wavio | Linthra | Coppelia | JellyBoxPlayer |
-|---|---|---|---|---|---|---|---|---|
-| Login | ✅ | ✅ | ✅ |  |  |  |  |  |
-| View library | ✅ | ✅ | ✅ |  |  |  |  |  |
-| View artist | ✅ | ⚠️ Saved content only | ⚠️ Saved content only |  |  |  |  |  |
-| View album | ✅ | ⚠️ From search | ⚠️ Saved content only |  |  |  |  |  |
-| Search | ⚠️ Only songs | ✅ | ⚠️ Only songs |  |  |  |  |  |
-| Play an uncached track | ✅ | ✅ | ✅ |  |  |  |  |  |
-| Play a cached track | ✅ | ✅ | ✅ |  |  |  |  |  |
-| Download tracks | ✅ | ✅ Whole albums | ✅ Whole album or artist |  |  |  |  |  |
-| Autoplay | ✅ | ⚠️ From search | ✅ |  |  |  |  |  |
-| Skip tracks | ✅ | ✅ | ✅ |  |  |  |  |  |
-| Seek forward and backward | ✅ | ✅ | ✅ |  |  |  |  |  |
-| Like/Unlike | ✅ | ✖️ | ✅ |  |  |  |  |  |
-| Create a playlist | ✅ | ✖️ | ✅ |  |  |  |  |  |
-| Edit playlist content | ✅ | ✖️ | ✅ |  |  |  |  |  |
-| Remove playlist | ✖️ | ✖️ | ✅ |  |  |  |  |  |
-| Display lyrics | ✖️ | ✅ | ✅ |  |  |  |  |  |
-| Follow artist | ✅ | ⚠️ Saved content only | ✖️ |  |  |  |  |  |
-| Save album | ✅ | ✖️ | ✖️ |  |  |  |  |  |
+| Feature | Finamp | Fintunes | Yuzic | Jellify | CassetteCat | Wavio | Linthra | Coppelia | JellyBoxPlayer |
+|---|---|---|---|---|---|---|---|---|---|
+| Login | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
+| View library | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
+| View artist | ✅ | ⚠️ Saved content only | ⚠️ Saved content only | ✅ |  |  |  |  |
+| View album | ✅ | ⚠️ From search | ⚠️ Saved content only | ✅ |  |  |  |  |
+| Search | ⚠️ Only songs | ✅ | ⚠️ Only songs | ⚠️ Only songs |  |  |  |  |
+| Play an uncached track | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
+| Play a cached track | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
+| Download tracks | ✅ | ✅ Whole albums | ✅ Whole album or artist | ✅ |  |  |  |  |
+| Autoplay | ✅ | ⚠️ From search | ✅ | ⚠️ Manual Queuing |  |  |  |  |
+| Skip tracks | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
+| Seek forward and backward | ✅ | ✅ | ✅ | ❌ |  |  |  |  |
+| Like/Unlike | ✅ | ✖️ | ✅ | ✅ |  |  |  |  |
+| Create a playlist | ✅ | ✖️ | ✅ | ✅ |  |  |  |  |
+| Edit playlist content | ✅ | ✖️ | ✅ | ✅ |  |  |  |  |
+| Remove playlist | ✖️ | ✖️ | ✅ | ✅ |  |  |  |  |
+| Display lyrics | ✖️ | ✅ | ✅ | ✅ |  |  |  |  |
+| Follow artist | ✅ | ⚠️ Saved content only | ✖️ | ✅ |  |  |  |  |
+| Save album | ✅ | ✖️ | ✖️ | ✅ |  |  |  |  |
 
 ### Legend
 
