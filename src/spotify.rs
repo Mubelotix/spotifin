@@ -797,6 +797,19 @@ const CREATE_PLAYLIST_JS: &str = r#"
 })()
 "#;
 
+const DELETE_PLAYLIST_JS: &str = r#"
+(async () => {
+    const uri = PLAYLIST_PLACEHOLDER;
+    const root = await Spicetify.Platform.RootlistAPI.getContents({ offset: 0, limit: 500 });
+    if (!(root.items || []).some(item => item.uri === uri)) return "ok";
+    const result = await Spicetify.Platform.RootlistAPI.applyModification({
+        operation: "remove", uris: [uri]
+    });
+    if (!result?.success) throw new Error("deletion refused");
+    return "ok";
+})()
+"#;
+
 const MODIFY_JS: &str = r#"
 (async () => {
     const uri = PLAYLIST_PLACEHOLDER;
@@ -852,6 +865,19 @@ pub async fn create_playlist(bridge: &BridgeState, name: &str) -> Result<String,
     let literal = serde_json::to_string(name).map_err(|e| e.to_string())?;
     let code = CREATE_PLAYLIST_JS.replace("NAME_PLACEHOLDER", &literal);
     eval_string(bridge, code).await
+}
+
+pub async fn delete_playlist(bridge: &BridgeState, spotify_uri: &str) -> Result<(), String> {
+    let code = DELETE_PLAYLIST_JS.replace("PLAYLIST_PLACEHOLDER", &playlist_uri_literal(spotify_uri));
+    eval_string(bridge, code).await.map(|_| ())
+}
+
+pub async fn delete_playlist_cache(cache_dir: &Path, playlist_id: Uuid) -> Result<(), String> {
+    match tokio::fs::remove_file(cache_dir.join(format!("playlist-{playlist_id}.json"))).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 async fn eval_string(bridge: &BridgeState, code: String) -> Result<String, String> {

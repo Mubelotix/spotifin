@@ -54,6 +54,27 @@ pub async fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<
     })))
 }
 
+/// Deletes a user-owned Spotify playlist from the rootlist.
+#[delete("/Playlists/<playlist_id>")]
+pub async fn delete_playlist(playlist_id: Uuid, state: &State<AppState>) -> Result<Status, Status> {
+    let spotify_uri = state
+        .catalog
+        .read()
+        .unwrap()
+        .playlists
+        .get(&playlist_id)
+        .ok_or(Status::NotFound)?
+        .spotify_uri
+        .clone()
+        .ok_or(Status::Conflict)?;
+    spotify::delete_playlist(&state.bridge, &spotify_uri).await.map_err(|_| Status::BadGateway)?;
+    state.catalog.write().unwrap().playlists.remove(&playlist_id);
+    if let Err(error) = spotify::delete_playlist_cache(&state.audio.cache, playlist_id).await {
+        eprintln!("could not remove deleted playlist cache: {error}");
+    }
+    Ok(Status::NoContent)
+}
+
 #[get("/Playlists/<playlist_id>/Items?<query..>")]
 pub async fn playlist_items(
     playlist_id: Uuid,
