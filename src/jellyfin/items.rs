@@ -113,6 +113,27 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
         }
     }
 
+    // An album can be discovered from a single track before it is saved. Load
+    // its complete track list when the client opens the album page.
+    if let Some(album_uri) = parent.and_then(|id| {
+        state.catalog.read().unwrap().albums.get(&id).map(|album| album.uri.clone())
+    }) {
+        match crate::spotify::album_tracks(&state.bridge, &album_uri).await {
+            Ok(results) => {
+                {
+                    let mut catalog = state.catalog.write().unwrap();
+                    for track in &results {
+                        crate::spotify::ingest_track(&mut catalog, track);
+                    }
+                }
+                if let Err(error) = crate::spotify::cache_album_tracks(&state.audio.cache, &album_uri, &results).await {
+                    eprintln!("could not cache album {album_uri}: {error}");
+                }
+            }
+            Err(error) => eprintln!("album fetch failed for {album_uri}: {error}"),
+        }
+    }
+
     // Fetch an artist's complete discography before filtering, so artist pages
     // are not limited to saved albums or tracks previously seen by the server.
     for artist_id in &fetch_artist_ids {

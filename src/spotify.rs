@@ -191,7 +191,7 @@ pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| {
-                (name.starts_with("playlist-") || name.starts_with("track-"))
+                (name.starts_with("playlist-") || name.starts_with("track-") || name.starts_with("album-"))
                     && name.ends_with(".json")
             })
         {
@@ -209,7 +209,15 @@ pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("track-"));
             let id = catalog::stable_id(value.get("uri").and_then(Value::as_str).unwrap());
-            if remote {
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("album-"))
+            {
+                for track in array_of(value.get("tracks")) {
+                    add_track(&mut catalog, track);
+                }
+            } else if remote {
                 if ingest_track(&mut catalog, &value).is_some() {
                     catalog.mark_remote_track(id);
                 }
@@ -248,6 +256,18 @@ pub async fn cache_remote_track(cache_dir: &Path, raw: &Value) -> Result<(), Str
     let json = serde_json::to_vec_pretty(raw).map_err(|error| error.to_string())?;
     let path = cache_dir.join(format!("track-{id}.json"));
     let temporary = cache_dir.join(format!("track-{id}.json.tmp"));
+    tokio::fs::write(&temporary, json).await.map_err(|error| error.to_string())?;
+    tokio::fs::rename(&temporary, &path).await.map_err(|error| error.to_string())
+}
+
+/// Persists the complete track list fetched for an album. This keeps albums
+/// discovered from playback usable after a backend restart.
+pub async fn cache_album_tracks(cache_dir: &Path, album_uri: &str, tracks: &[Value]) -> Result<(), String> {
+    let id = catalog::stable_id(album_uri);
+    let raw = serde_json::json!({ "uri": album_uri, "tracks": tracks });
+    let json = serde_json::to_vec_pretty(&raw).map_err(|error| error.to_string())?;
+    let path = cache_dir.join(format!("album-{id}.json"));
+    let temporary = cache_dir.join(format!("album-{id}.json.tmp"));
     tokio::fs::write(&temporary, json).await.map_err(|error| error.to_string())?;
     tokio::fs::rename(&temporary, &path).await.map_err(|error| error.to_string())
 }
@@ -393,6 +413,41 @@ pub async fn artist_tracks(bridge: &BridgeState, artist_uri: &str) -> Result<Art
     serde_json::from_str::<ArtistFetchRaw>(raw)
         .map(|result| ArtistFetch { tracks: result.tracks, image: result.image })
         .map_err(|error| format!("artist JSON invalid: {error}"))
+}
+
+const ALBUM_TRACKS_JS: &str = r#"
+(async () => {
+    const result = await Spicetify.GraphQL.Request(
+        Spicetify.GraphQL.Definitions.getAlbum,
+        { uri: ALBUM_URI_PLACEHOLDER, offset: 0, limit: 2000 }
+    );
+    const album = result?.data?.albumUnion;
+    if (!album) throw new Error("no album data");
+    const image = album.coverArt?.sources?.[0]?.url || null;
+    return JSON.stringify((album.tracksV2?.items || []).filter(row => row.track?.uri).map(row => ({
+        uri: row.track.uri,
+        name: row.track.name ?? null,
+        album: { uri: album.uri ?? ALBUM_URI_PLACEHOLDER, name: album.name ?? null, image,
+            year: album.date?.year ?? null },
+        artists: (row.track.artists?.items || []).map(a => ({
+            uri: a.uri ?? null, name: a.profile?.name ?? a.name ?? null
+        })),
+        ms: row.track.duration?.totalMilliseconds ?? row.track.duration?.milliseconds ?? null,
+        disc: row.track.discNumber ?? 0,
+        num: row.track.trackNumber ?? 0
+    })));
+})()
+"#;
+
+pub async fn album_tracks(bridge: &BridgeState, album_uri: &str) -> Result<Vec<Value>, String> {
+    let literal = serde_json::to_string(album_uri).map_err(|e| e.to_string())?;
+    let code = ALBUM_TRACKS_JS.replace("ALBUM_URI_PLACEHOLDER", &literal);
+    let response = eval_on_bridge(bridge, code).await.map_err(|error| format!("album fetch failed: {error}"))?;
+    let raw = response
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "album fetch returned no value".to_string())?;
+    serde_json::from_str::<Vec<Value>>(raw).map_err(|error| format!("album JSON invalid: {error}"))
 }
 
 #[derive(serde::Deserialize)]
@@ -890,6 +945,31 @@ mod tests {
         assert_eq!(playlist.entries.len(), 1);
         assert_eq!(playlist.entries[0].track_id, track_id);
         assert_eq!(restored.tracks.get(&track_id).unwrap().name, "Cached track");
+
+        tokio::fs::remove_dir_all(&cache_dir).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn album_cache_round_trip() {
+        let cache_dir = std::env::temp_dir().join(format!("spotify-server-album-cache-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&cache_dir).await;
+        tokio::fs::create_dir_all(&cache_dir).await.unwrap();
+        let tracks = vec![serde_json::json!({
+            "uri": "spotify:track:cached-album-track",
+            "name": "Cached album track",
+            "album": { "uri": "spotify:album:cached-album", "name": "Cached album", "image": null },
+            "artists": [],
+            "ms": 1000,
+            "disc": 1,
+            "num": 1
+        })];
+
+        cache_album_tracks(&cache_dir, "spotify:album:cached-album", &tracks).await.unwrap();
+        let restored = load_playlist_cache(&cache_dir).await;
+        let album_id = catalog::stable_id("spotify:album:cached-album");
+        let track_id = catalog::stable_id("spotify:track:cached-album-track");
+        assert_eq!(restored.albums.get(&album_id).unwrap().name, "Cached album");
+        assert_eq!(restored.tracks.get(&track_id).unwrap().album_id, Some(album_id));
 
         tokio::fs::remove_dir_all(&cache_dir).await.unwrap();
     }
