@@ -1,5 +1,9 @@
 use std::process::Command;
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex as StdMutex};
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    Arc,
+    Mutex as StdMutex,
+};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
@@ -11,6 +15,7 @@ use crate::bridge::{eval_on_bridge, BridgeState};
 #[derive(Default)]
 struct PlayerInner {
     last_item: Mutex<Option<uuid::Uuid>>,
+    switch_generation: AtomicU64,
     last_switch: Mutex<Option<Instant>>,
     requested_item: Mutex<Option<uuid::Uuid>>,
     session: Mutex<Option<CaptureSession>>,
@@ -190,7 +195,16 @@ pub async fn prepare(
     item_id: uuid::Uuid,
     recording: &std::path::Path,
     cache_dir: &std::path::Path,
+    probe: bool,
 ) -> bool {
+    let generation = (!probe).then(|| {
+        state
+            .player
+            .inner
+            .switch_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1
+    });
     state.player.note_activity();
     let (uri, duration_ms) = {
         let catalog = state.catalog.read().unwrap();
@@ -204,8 +218,13 @@ pub async fn prepare(
     };
 
     let mut last = state.player.inner.last_item.lock().await;
+    if generation.is_some_and(|generation| {
+        state.player.inner.switch_generation.load(Ordering::Acquire) != generation
+    }) {
+        return false;
+    }
     let requested = *state.player.inner.requested_item.lock().await;
-    if requested.is_some_and(|requested| requested != item_id) {
+    if probe && requested.is_some_and(|requested| requested != item_id) {
         return false;
     }
     let still_capturing = state
@@ -223,14 +242,15 @@ pub async fn prepare(
     // full duration.
     if *last != Some(item_id)
         && state.player.has_live_stream()
-        && requested != Some(item_id)
+        && probe
     {
         return false;
     }
     // Native players probe several queued URLs immediately after a selection.
     // Do not let those probes retune the shared Spotify player; a later request
     // outside this window is treated as an intentional track change.
-    if *last != Some(item_id)
+    if probe
+        && *last != Some(item_id)
         && state
             .player
             .inner
@@ -242,6 +262,10 @@ pub async fn prepare(
         return false;
     }
 
+    // Invalidate readers of the old shared recording before resetting it. Their
+    // next loop iteration will observe the missing session and stop instead of
+    // consuming bytes from the new track.
+    *state.player.inner.session.lock().await = None;
     let previous_len = tokio::fs::metadata(recording).await.map(|m| m.len()).unwrap_or(0);
     // Clear the old capture before Spotify starts the new track. Resetting
     // after play has begun loses the intro while waiting for verification.
@@ -249,6 +273,11 @@ pub async fn prepare(
     wait_recorder_restarted(recording, previous_len).await;
     match play_uri(&state.bridge, &uri).await {
         Ok(title) => {
+            if generation.is_some_and(|generation| {
+                state.player.inner.switch_generation.load(Ordering::Acquire) != generation
+            }) {
+                return false;
+            }
             let capture_start = Instant::now();
             eprintln!("now playing: {title}");
             tokio::time::sleep(Duration::from_millis(2500)).await;
@@ -259,6 +288,11 @@ pub async fn prepare(
                     return true;
                 }
             };
+            if generation.is_some_and(|generation| {
+                state.player.inner.switch_generation.load(Ordering::Acquire) != generation
+            }) {
+                return false;
+            }
             eprintln!("verified now playing: {title}");
             let min_end = capture_start + Duration::from_millis(duration_ms);
             let expected_bytes = capture_bytes_for_duration(duration_ms);

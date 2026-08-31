@@ -19,6 +19,7 @@ pub fn routes() -> Vec<Route> {
             universal,
             file_alias,
             item_file_alias,
+            download,
             stream_alias,
             stream_mp3,
             stream_aac,
@@ -78,6 +79,9 @@ fn audio_stream(
             }
 
             if let Some(capture) = session {
+                if control.session_for(capture.item).await.is_none() {
+                    break;
+                }
                 let now = std::time::Instant::now();
                 if offset >= capture.expected_bytes && now >= capture.min_end {
                     break;
@@ -212,7 +216,39 @@ async fn open_audio_stream(
             explicit_range,
         ));
     }
-    if !player::prepare(state, id, &state.audio.recording, &state.audio.cache).await {
+    // Linthra probes a selected and several speculative tracks with the same
+    // `bytes=0-1` request. A probe must not retune the shared Spotify player:
+    // the real, non-ranged request follows it and is the selection boundary.
+    if range.0.as_deref() == Some("bytes=0-1") {
+        let total = state
+            .catalog
+            .read()
+            .unwrap()
+            .tracks
+            .get(&id)
+            .map(|track| player::capture_bytes_for_duration(track.duration_ms))
+            .filter(|total| *total >= 2)
+            .unwrap_or(2);
+        return Ok(audio_stream(
+            state.audio.recording.clone(),
+            state.player.clone(),
+            false,
+            None,
+            Some((0, 1, total)),
+            Some(2),
+            false,
+            true,
+        ));
+    }
+    if !player::prepare(
+        state,
+        id,
+        &state.audio.recording,
+        &state.audio.cache,
+        false,
+    )
+    .await
+    {
         return Err(rocket::http::Status::Conflict);
     }
 
@@ -259,6 +295,13 @@ pub async fn file_alias(state: &State<crate::AppState>, item_id: &str, range: Ra
 /// media-source path returned in PlaybackInfo.
 #[get("/Items/<item_id>/File")]
 pub async fn item_file_alias(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    open_audio_stream(state, item_id, range).await
+}
+
+/// Linthra uses Jellyfin's download URL when a remote track is being added to
+/// its local cache. The source is the same capture as the stream endpoint.
+#[get("/Items/<item_id>/Download")]
+pub async fn download(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
     open_audio_stream(state, item_id, range).await
 }
 
