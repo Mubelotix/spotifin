@@ -9,15 +9,24 @@
 | Search | ⚠️ Only songs |  |  |  |  |  |  |  |
 | Play an uncached track | ✅ |  |  |  |  |  |  |  |
 | Play a cached track | ✅ |  |  |  |  |  |  |  |
+| Download tracks |  |  |  |  |  |  |  |  |
 | Autoplay | ✅ |  |  |  |  |  |  |  |
 | Skip tracks | ✅ |  |  |  |  |  |  |  |
 | Seek forward and backward | ✅ |  |  |  |  |  |  |  |
 | Like/Unlike | ✅ |  |  |  |  |  |  |  |
 | Create a playlist | ✅ |  |  |  |  |  |  |  |
 | Edit playlist content | ✅ |  |  |  |  |  |  |  |
-| Display lyrics | ❌ |  |  |  |  |  |  |  |
+| Remove playlist | ✖️ |  |  |  |  |  |  |  |
+| Display lyrics | ✖️ |  |  |  |  |  |  |  |
 | Follow artist | ✅ |  |  |  |  |  |  |  |
 | Save album | ✅ |  |  |  |  |  |  |  |
+
+### Legend
+
+✅ Verified  
+⚠️ Partially working  
+✖️ Not implemented in the app  
+❌ Broken
 
 ## Spotify Recommendations
 
