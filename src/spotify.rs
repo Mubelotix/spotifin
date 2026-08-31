@@ -4,34 +4,75 @@ use uuid::Uuid;
 use crate::bridge::eval_on_bridge;
 use crate::catalog::{self, Album, Artist, Catalog, Playlist, PlaylistEntry, Track};
 
-/// One eval per refresh: walk the rootlist, then pull every playlist with its
-/// tracks. Runs inside the Spotify renderer, so it is the client querying
-/// its own backend.
+/// One eval per refresh: pull playlists (rootlist + liked songs), then saved
+/// albums with their tracks and followed artists. Runs inside the Spotify
+/// renderer, so it is the client querying its own backend.
 const COLLECT_JS: &str = r#"
 (async () => {
+    async function dumpPlaylist(uri, fallbackName) {
+        const p = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri);
+        return {
+            uri,
+            name: p.metadata?.name ?? fallbackName ?? "Playlist",
+            image: (p.metadata?.images && p.metadata.images[0]?.url) || null,
+            tracks: trackList(p.contents)
+        };
+    }
+
+    async function dumpAlbum(uri, fallbackName) {
+        const r = await Spicetify.GraphQL.Request(Spicetify.GraphQL.Definitions.getAlbum, { uri, offset: 0, limit: 2000 });
+        const a = r?.data?.albumUnion;
+        if (!a) throw new Error("no album data");
+        const image = (a.coverArt?.sources && a.coverArt.sources[0]?.url) || null;
+        return {
+            uri: a.uri ?? uri,
+            name: a.name ?? fallbackName ?? "Album",
+            year: a.date?.year ?? null,
+            image,
+            tracks: (a.tracksV2?.items || []).filter(i => i.track).map(i => ({
+                uri: i.track.uri,
+                name: i.track.name ?? null,
+                album: { uri, name: a.name ?? fallbackName ?? null, image },
+                artists: (i.track.artists?.items || []).map(x => ({ uri: x.uri ?? null, name: x.name ?? null })),
+                ms: i.track.duration?.milliseconds ?? null,
+                disc: i.track.discNumber ?? 0,
+                num: i.track.trackNumber ?? 0
+            }))
+        };
+    }
+
+    function trackList(contents) {
+        return (contents?.items || []).filter(t => t.type === "track").map(t => ({
+            uri: t.uri,
+            name: t.name ?? null,
+            album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
+                image: (t.album.images && t.album.images[0]?.url) || null } : null,
+            artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
+            ms: t.duration?.milliseconds ?? null,
+            disc: t.discNumber ?? 0,
+            num: t.trackNumber ?? 0
+        }));
+    }
+
+    const out = { playlists: [], albums: [], artists: [] };
     const root = await Spicetify.Platform.RootlistAPI.getContents({ offset: 0, limit: 500 });
-    const out = [];
     for (const entry of root.items) {
         if (entry.type !== "playlist") continue;
-        const playlist = await Spicetify.Platform.PlaylistAPI.getPlaylist(entry.uri);
-        const items = (playlist.contents?.items || []).filter(t => t.type === "track");
-        out.push({
-            uri: entry.uri,
-            name: entry.name,
-            image: (entry.images && entry.images[0]?.url) || null,
-            totalLength: (playlist.contents?.totalLength) ?? null,
-            tracks: items.map(t => ({
-                uri: t.uri,
-                name: t.name ?? null,
-                album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
-                    image: (t.album.images && t.album.images[0]?.url) || null } : null,
-                artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
-                ms: t.duration?.milliseconds ?? null,
-                disc: t.discNumber ?? 0,
-                num: t.trackNumber ?? 0
-            }))
-        });
+        try { out.playlists.push(await dumpPlaylist(entry.uri, entry.name)); } catch (e) {}
     }
+    try { out.playlists.push(await dumpPlaylist("spotify:user:me:collection", "Liked Songs")); } catch (e) {}
+
+    try {
+        const library = await Spicetify.Platform.LibraryAPI.getContents({ offset: 0, limit: 500 });
+        for (const row of library.items || []) {
+            if (row.type === "album") {
+                try { out.albums.push(await dumpAlbum(row.uri, row.name)); } catch (e) {}
+            } else if (row.type === "artist") {
+                out.artists.push({ uri: row.uri, name: row.name });
+            }
+        }
+    } catch (e) {}
+
     return JSON.stringify(out);
 })()
 "#;
@@ -50,12 +91,35 @@ pub async fn collect(bridge: &crate::bridge::BridgeState) -> Result<Catalog, Str
 }
 
 fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
-    let entries = raw.as_array().ok_or("expected playlist array")?;
     let mut catalog = Catalog::new();
-    for playlist in entries {
+    for playlist in array_of(raw.get("playlists")) {
         add_playlist(&mut catalog, playlist);
     }
+    for album in array_of(raw.get("albums")) {
+        add_saved_album(&mut catalog, album);
+    }
+    for artist in array_of(raw.get("artists")) {
+        if let (Some(uri), Some(name)) = (str_field(artist, "uri"), str_field(artist, "name")) {
+            let id = catalog::stable_id(uri);
+            catalog.artists.entry(id).or_insert(Artist { id, name: name.to_string() });
+        }
+    }
     Ok(catalog)
+}
+
+fn array_of(value: Option<&Value>) -> &[Value] {
+    static EMPTY: [Value; 0] = [];
+    value.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&EMPTY)
+}
+
+/// Saved albums arrive with their full track list; register the tracks so
+/// album pages have children even when no playlist references them.
+fn add_saved_album(catalog: &mut Catalog, raw: &Value) {
+    let empty = Vec::new();
+    let tracks = raw.get("tracks").and_then(Value::as_array).unwrap_or(&empty);
+    for track in tracks {
+        add_track(catalog, track);
+    }
 }
 
 fn add_playlist(catalog: &mut Catalog, raw: &Value) {
@@ -125,10 +189,10 @@ fn artist_ids(catalog: &mut Catalog, raw: Option<&Value>) -> Vec<Uuid> {
         .filter_map(|artist| {
             let uri = str_field(artist, "uri")?;
             let id = catalog::stable_id(uri);
-            catalog.artists.entry(id).or_insert_with(|| Artist {
-                id,
-                name: str_field(artist, "name").unwrap_or("Unknown artist").to_string(),
-            });
+            let name = str_field(artist, "name").unwrap_or("Unknown artist");
+            if !name.is_empty() {
+                catalog.artists.entry(id).or_insert(Artist { id, name: name.to_string() });
+            }
             Some(id)
         })
         .collect()
