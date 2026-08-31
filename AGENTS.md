@@ -30,7 +30,7 @@ Spicetify plugins are env vars on `run-spotify.sh`: `SPICETIFY_EXTENSIONS` (defa
 
 ## How it works
 
-- **Catalog**: populated by one collector script evaluated in the renderer (rootlist playlists, Liked Songs via `PlaylistAPI.getPlaylist("spotify:user:me:collection")`, saved albums via `GraphQL getAlbum`/`tracksV2`, followed artists via `LibraryAPI.getContents`). Refreshed at boot and every 15 min; refreshes **merge**, never replace (search-ingested tracks and user data survive).
+- **Catalog**: populated by one collector script evaluated in the renderer (rootlist playlists, liked tracks via `PlaylistAPI.getPlaylist("spotify:user:me:collection")` and exposed through the favorite filter rather than as a playlist, saved albums via `GraphQL getAlbum`/`tracksV2`, followed artists via `LibraryAPI.getContents`). Refreshed at boot and every 15 min; refreshes **merge**, never replace (search-ingested tracks and user data survive).
 - **Search**: `SearchTerm` queries also hit Spotify search in the renderer; results are ingested with stable IDs, so any track on Spotify becomes playable by ID.
 - **Playback**: an audio request for a known item navigates to `/track/{id}`, presses play, verifies via `PlayerAPI.getState`, then resets the recorder. Responses end after exactly the track's expected byte count (recorder runs 192 kbps CBR). Byte-range requests and HEAD supported for seek bars.
 - **Audio cache**: finished captures are parked as plain `{item_id}.aac` files under `/config/audio/cache`; subsequent requests serve straight from disk and never touch Spotify. Size validation tolerates a chopped tail (≤ 6 s) since ffmpeg flushes in bursts — incomplete captures are retried on the next request.
