@@ -362,7 +362,8 @@ const ARTIST_TRACKS_JS: &str = r#"
             tracks.push({
                 uri: track.uri,
                 name: track.name ?? null,
-                album: { uri: album.uri ?? release.uri, name: album.name ?? release.name, image },
+                album: { uri: album.uri ?? release.uri, name: album.name ?? release.name, image,
+                    year: release.date?.year ?? album.date?.year ?? null },
                 artists: (track.artists?.items || []).map(a => ({
                     uri: a.uri ?? null, name: a.profile?.name ?? a.name ?? null
                 })),
@@ -616,11 +617,11 @@ fn add_track(catalog: &mut Catalog, raw: &Value) -> Option<Uuid> {
         return None;
     }
     let id = catalog::stable_id(uri);
+    let artist_ids = artist_ids(catalog, raw.get("artists"));
+    let album_id = raw.get("album").and_then(|album| add_album(catalog, album, &artist_ids));
     if catalog.tracks.contains_key(&id) {
         return Some(id);
     }
-    let artist_ids = artist_ids(catalog, raw.get("artists"));
-    let album_id = raw.get("album").and_then(|album| add_album(catalog, album, &artist_ids));
     catalog.tracks.insert(id, Track {
         id,
         uri: uri.to_string(),
@@ -637,17 +638,21 @@ fn add_track(catalog: &mut Catalog, raw: &Value) -> Option<Uuid> {
 fn add_album(catalog: &mut Catalog, raw: &Value, artist_ids: &[Uuid]) -> Option<Uuid> {
     let uri = str_field(raw, "uri")?;
     let id = catalog::stable_id(uri);
-    if !catalog.albums.contains_key(&id) {
+    let year = raw.get("year").and_then(Value::as_i64).map(|year| year as i32);
+    let album = catalog.albums.entry(id).or_insert_with(|| {
         let name = str_field(raw, "name").unwrap_or_default().to_string();
         // Local-file pseudo albums have empty names; fall back to a fixed label.
         let name = if name.is_empty() { "Local files".to_string() } else { name };
-        catalog.albums.insert(id, Album {
+        Album {
             id,
             name,
             artist_ids: artist_ids.to_vec(),
             image: image_of(raw.get("image")),
-            year: None,
-        });
+            year,
+        }
+    });
+    if album.year.is_none() {
+        album.year = year;
     }
     Some(id)
 }

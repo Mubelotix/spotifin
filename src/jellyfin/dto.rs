@@ -295,6 +295,7 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
     if let Some(album) = track.album_id.and_then(|id| catalog.albums.get(&id)) {
         dto.album = Some(album.name.clone());
         dto.album_id = Some(album.id);
+        dto.production_year = album.year;
         let (album_artists, _) = artist_refs(catalog, &album.artist_ids);
         dto.album_artist = album_artists.first().cloned();
         dto.album_artists = Some(
