@@ -445,8 +445,18 @@ pub fn music_genres() -> Json<QueryResult<BaseItemDto>> {
 #[get("/Search/Hints?<query..>")]
 pub async fn search_hints(query: ItemQuery, state: &State<AppState>) -> Json<Value> {
     let result = run_query(state, query).await;
+    let hints = result
+        .items
+        .into_iter()
+        .filter_map(|item| {
+            let mut hint = serde_json::to_value(item).ok()?.as_object()?.clone();
+            let item_id = hint.remove("Id")?;
+            hint.insert("ItemId".to_string(), item_id);
+            Some(Value::Object(hint))
+        })
+        .collect::<Vec<_>>();
     Json(serde_json::json!({
-        "SearchHints": result.items,
+        "SearchHints": hints,
         "TotalRecordCount": result.total_record_count,
     }))
 }
