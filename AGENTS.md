@@ -8,6 +8,7 @@ Keep the file count minimal:
 
 - `Containerfile` — everything container-related lives here. Inline any container config (openbox autostart, init scripts, wrappers) into the Containerfile with `RUN printf '%s\n' ...` instead of creating `root/` files (podman 4.9 does not support Dockerfile heredocs).
 - `run-spotify.sh` — the only helper script: builds nothing, just runs the container.
+- `TARGET.md` — implementation target and compatibility reference for the Jellyfin music API.
 
 ## Preferences
 
@@ -45,3 +46,7 @@ alias spicetify='podman exec -u abc -e HOME=/config -e SPICETIFY_CONFIG=/config/
 ```
 
 Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/spicetify/CustomApps/` (lyrics-plus, new-releases, reddit). More via the spicetify Marketplace.
+
+## Jellyfin API
+
+`TARGET.md` documents the Jellyfin music API required for a compatible reimplementation. It is based on the Jellyfin server, Finamp, and jellyfin-audio-player sources cloned under `/tmp/target-research/`.
