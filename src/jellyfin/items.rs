@@ -17,6 +17,8 @@ pub struct ItemQuery {
     parent_id: Option<String>,
     #[field(name = "SearchTerm")]
     search_term: Option<String>,
+    #[field(name = "searchTerm")]
+    search_term_lowercase: Option<String>,
     #[field(name = "Filters")]
     filters: Option<String>,
     #[field(name = "ArtistIds")]
@@ -69,7 +71,11 @@ fn parse_ids(raw: Option<&str>) -> Vec<Uuid> {
 async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDto> {
     let types = parse_types(query.include_item_types.clone());
     let parent = query.parent_id.as_deref().and_then(|raw| Uuid::parse_str(raw).ok());
-    let search = query.search_term.as_deref().unwrap_or_default();
+    let search = query
+        .search_term
+        .as_deref()
+        .or(query.search_term_lowercase.as_deref())
+        .unwrap_or_default();
     let mut artist_ids = parse_ids(query.artist_ids.as_deref());
     let album_artist_ids = parse_ids(query.album_artist_ids.as_deref());
     let ids = parse_ids(query.ids.as_deref());
