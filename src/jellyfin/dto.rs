@@ -238,7 +238,11 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
             dto.artists = Some(Vec::new());
             dto.artist_items = Some(Vec::new());
             dto.album_artists = Some(Vec::new());
-            dto.image_tags = image_tag(&artist.image);
+            // Keep the field non-null as well; Fintunes treats collection
+            // metadata as required while navigating from the player.
+            dto.image_tags = Some(ImageTags {
+                primary: artist.image.as_deref().map(encode_image_tag).unwrap_or_default(),
+            });
             dto.run_time_ticks = Some(0);
         }
         _ => {}
