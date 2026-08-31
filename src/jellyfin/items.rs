@@ -311,21 +311,11 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
             _ => None,
         }
     };
-    // A track mix is requested before the client starts its queue. Seed
-    // Spotify first so nextItems belongs to the requested track, not to a
-    // previous playback context.
+    // InstantMix is metadata requested by the client, not a playback command.
+    // Never seed Spotify's station queue here: doing so starts unrelated music
+    // and lets Spotify advance outside the Jellyfin queue.
     let seeded = seed_uri.is_some();
-    let autoplay = crate::spotify::autoplay_tracks(&state.bridge, seed_uri.as_deref())
-        .await
-        .unwrap_or_default();
-
-    if !autoplay.is_empty() {
-        let mut catalog = state.catalog.write().unwrap();
-        for track in autoplay.iter().take(limit) {
-            crate::spotify::ingest_track(&mut catalog, track);
-        }
-    }
-
+    let autoplay: Vec<Value> = Vec::new();
     let catalog = state.catalog.read().unwrap();
     let seed = catalog.item(item_id).map(|item| item.name().to_string());
     let mut tracks = if autoplay.is_empty() {

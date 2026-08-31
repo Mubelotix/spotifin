@@ -324,53 +324,6 @@ const SEARCH_JS: &str = r#"
 })()
 "#;
 
-const AUTOPLAY_JS: &str = r#"
-(async () => {
-    const seed = SEED_PLACEHOLDER;
-    if (seed) {
-        const station = seed.startsWith("spotify:track:")
-            ? "spotify:station:track:" + seed.slice("spotify:track:".length)
-            : seed;
-        await Spicetify.Player.playUri(station);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-    }
-    const tracks = Spicetify.Player.data?.nextItems || [];
-    return JSON.stringify(tracks.filter(t => t?.type === "track" && t?.uri).map(t => ({
-        uri: t.uri,
-        name: t.name ?? null,
-        album: t.album ? {
-            uri: t.album.uri ?? null,
-            name: t.album.name ?? null,
-            image: (t.album.images && t.album.images[0]?.url) || null
-        } : null,
-        artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
-        ms: t.duration?.totalMilliseconds ?? t.duration?.milliseconds ?? null,
-        disc: Number(t.metadata?.album_disc_number ?? 0),
-        num: Number(t.metadata?.album_track_number ?? 0)
-    })));
-})()
-"#;
-
-/// Returns Spotify's currently materialized autoplay recommendations. The
-/// renderer already has complete metadata for these tracks, so no public API
-/// request is needed.
-pub async fn autoplay_tracks(bridge: &BridgeState, seed_uri: Option<&str>) -> Result<Vec<Value>, String> {
-    let seed = seed_uri
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(|error| error.to_string())?
-        .unwrap_or_else(|| "null".to_string());
-    let code = AUTOPLAY_JS.replace("SEED_PLACEHOLDER", &seed);
-    let response = eval_on_bridge(bridge, code)
-        .await
-        .map_err(|error| format!("autoplay query failed: {error}"))?;
-    let raw = response
-        .get("value")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "autoplay query returned no value".to_string())?;
-    serde_json::from_str::<Vec<Value>>(raw).map_err(|error| format!("autoplay JSON invalid: {error}"))
-}
-
 /// Searches Spotify from the renderer and returns raw track entries ready
 /// for `ingest_track`.
 pub async fn search(bridge: &BridgeState, query: &str) -> Result<Vec<Value>, String> {
