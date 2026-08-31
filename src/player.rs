@@ -61,6 +61,14 @@ impl PlayerControl {
         }
     }
 
+    pub async fn stop_requested(&self, item: uuid::Uuid) {
+        self.clear_requested(item).await;
+        let mut session = self.inner.session.lock().await;
+        if session.is_some_and(|capture| capture.item == item) {
+            *session = None;
+        }
+    }
+
     /// Capture plan for `item`, if it is the one being recorded.
     pub async fn session_for(&self, item: uuid::Uuid) -> Option<CaptureSession> {
         match self.inner.session.lock().await.as_ref() {
@@ -75,10 +83,6 @@ impl PlayerControl {
 
     pub(crate) fn stream_finished(&self) {
         self.inner.live_streams.fetch_sub(1, Ordering::AcqRel);
-    }
-
-    fn has_live_stream(&self) -> bool {
-        self.inner.live_streams.load(Ordering::Acquire) != 0
     }
 
     /// True while some requested track may still be sounding: pausing would
@@ -242,14 +246,6 @@ pub async fn prepare(
         .is_some_and(|session| Instant::now() < session.min_end);
     if *last == Some(item_id) && still_capturing {
         return true;
-    }
-    // Yuzic preloads the next two queue entries. Their URLs look identical to
-    // the active URL, but switching Spotify for one of them would make the
-    // current stream contain the wrong track. A real skip closes the old
-    // stream first, so use that boundary rather than blocking for the song's
-    // full duration.
-    if *last != Some(item_id) && state.player.has_live_stream() {
-        return false;
     }
     // Native players probe several queued URLs immediately after a selection.
     // Do not let those probes retune the shared Spotify player; a later request
