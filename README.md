@@ -6,12 +6,12 @@
 | View library | ✅ | ✅ | ✅ | ✅ | ⚠️ Without Playlists | ✅ | ✅ | ✅ | ✅ |
 | View artist | ✅ | ⚠️ Saved content only | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ | ✅ |
 | View album | ✅ | ⚠️ From search | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ | ✅ |
-| Remote Search | ⚠️ Only songs | ✅ | ⚠️ Only songs | ⚠️ Only songs | ✖️ | ⚠️ Only songs | ✖️ | ⚠️ Only songs | ✖️ |
+| Remote Search | ✖️ | ✅ | ⚠️ Only songs | ⚠️ Only songs | ✖️ | ⚠️ Only songs | ✖️ | ⚠️ Only songs | ✖️ |
 | Play an uncached track | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ Slow | ⚠️ Unreliable | ✅ |
 | Play a cached track | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Download tracks | ✅ | ✅ Whole albums | ✅ Whole album or artist | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Autoplay | ✅ | ⚠️ From search | ✅ | ✅ | ✅ | ✅ | ✖️ | ✖️ | ✖️ |
-| Seek forward and backward |  |  | | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Seek forward and backward | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Like/Unlike | ✅ | ✖️ | ✅ | ✅ | ✅ | ✅ | ✖️ | ✅ | ⚠️ Only in lists |
 | Create a playlist | ✅ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ | ✅ | ✅ | ✅ |
 | Edit playlist content | ✅ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ | ✅ | ✅ | ✅ |
