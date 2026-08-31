@@ -314,44 +314,19 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
     // InstantMix is metadata requested by the client, not a playback command.
     // Never seed Spotify's station queue here: doing so starts unrelated music
     // and lets Spotify advance outside the Jellyfin queue.
-    let seeded = seed_uri.is_some();
-    let autoplay: Vec<Value> = Vec::new();
     let catalog = state.catalog.read().unwrap();
-    let seed = catalog.item(item_id).map(|item| item.name().to_string());
-    let mut tracks = if autoplay.is_empty() {
-        if seeded {
-            seed_uri
-                .as_deref()
-                .map(crate::catalog::stable_id)
-                .and_then(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
+    let seed_id = seed_uri.as_deref().map(crate::catalog::stable_id);
+    let mut tracks = seed_id
+        .and_then(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
+        .into_iter()
+        .collect::<Vec<_>>();
+    if limit > tracks.len() {
+        tracks.extend(
+            catalog
+                .random_tracks(limit - tracks.len())
                 .into_iter()
-                .collect()
-        } else {
-            catalog.random_tracks(limit)
-        }
-    } else {
-        let mut ids = autoplay
-            .iter()
-            .take(limit)
-            .filter_map(|raw| raw.get("uri").and_then(Value::as_str))
-            .map(crate::catalog::stable_id)
-            .collect::<Vec<_>>();
-        if seeded {
-            if let Some(seed_uri) = seed_uri.as_deref() {
-                ids.insert(0, crate::catalog::stable_id(seed_uri));
-                ids.truncate(limit);
-            }
-        }
-        ids.into_iter()
-            .filter_map(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
-            .collect()
-    };
-    // The fallback keeps the old deterministic seed behavior. Spotify's
-    // autoplay list is already ordered by its recommendation engine.
-    if autoplay.is_empty() {
-        if let Some(seed) = seed {
-            tracks.sort_by_key(|track| format!("{}:{}", seed, track.id()));
-        }
+                .filter(|track| Some(track.id()) != seed_id),
+        );
     }
     let dtos = tracks.iter().map(|track| base_item(&catalog, track, None)).collect();
     Json(QueryResult { items: dtos, total_record_count: tracks.len(), start_index: 0 })
