@@ -312,9 +312,12 @@ impl Catalog {
         favorites_only: bool,
         artist_ids: &[Uuid],
         album_artist_ids: &[Uuid],
+        contributing_artist_ids: &[Uuid],
     ) -> Vec<Item<'_>> {
         let mut items = self.candidate_items(parent);
-        items.retain(|item| self.matches(item, types, parent, search, favorites_only, artist_ids, album_artist_ids));
+        items.retain(|item| {
+            self.matches(item, types, parent, search, favorites_only, artist_ids, album_artist_ids, contributing_artist_ids)
+        });
         if !matches!(parent, Some(id) if self.playlists.contains_key(&id)) {
             items.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
         }
@@ -384,6 +387,7 @@ impl Catalog {
         favorites_only: bool,
         artist_ids: &[Uuid],
         album_artist_ids: &[Uuid],
+        contributing_artist_ids: &[Uuid],
     ) -> bool {
         if matches!(item, Item::Library(_)) && parent.is_some() {
             return false;
@@ -420,6 +424,9 @@ impl Catalog {
         if !album_artist_ids.is_empty() && !self.has_album_artist(item, album_artist_ids) {
             return false;
         }
+        if !contributing_artist_ids.is_empty() && !self.has_contributing_artist(item, contributing_artist_ids) {
+            return false;
+        }
         match search {
             Some(term) => self.searchable_text(item).contains_all_words(term),
             None => true,
@@ -441,6 +448,18 @@ impl Catalog {
                 .and_then(|id| self.albums.get(&id))
                 .is_some_and(|album| album.artist_ids.iter().any(|id| artist_ids.contains(id))),
             Item::Album(album) => album.artist_ids.iter().any(|id| artist_ids.contains(id)),
+            _ => false,
+        }
+    }
+
+    fn has_contributing_artist(&self, item: &Item<'_>, artist_ids: &[Uuid]) -> bool {
+        match item {
+            Item::Track(track) => track.artist_ids.iter().any(|id| artist_ids.contains(id)),
+            Item::Album(album) => self.tracks.values().any(|track| {
+                track.album_id == Some(album.id)
+                    && track.artist_ids.iter().any(|id| artist_ids.contains(id))
+                    && !album.artist_ids.iter().any(|id| artist_ids.contains(id))
+            }),
             _ => false,
         }
     }

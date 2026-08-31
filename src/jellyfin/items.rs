@@ -23,6 +23,8 @@ pub struct ItemQuery {
     artist_ids: Option<String>,
     #[field(name = "albumartistids")]
     album_artist_ids: Option<String>,
+    #[field(name = "contributingartistids")]
+    contributing_artist_ids: Option<String>,
     #[field(name = "ids")]
     ids: Option<String>,
     #[field(name = "startindex")]
@@ -76,6 +78,7 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
         .unwrap_or_default();
     let mut artist_ids = parse_ids(query.artist_ids.as_deref());
     let album_artist_ids = parse_ids(query.album_artist_ids.as_deref());
+    let contributing_artist_ids = parse_ids(query.contributing_artist_ids.as_deref());
     let ids = parse_ids(query.ids.as_deref());
     if let Some(id) = parent {
         let is_artist = state.catalog.read().unwrap().artists.contains_key(&id);
@@ -85,6 +88,11 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     }
     let mut fetch_artist_ids = artist_ids.clone();
     for id in &album_artist_ids {
+        if !fetch_artist_ids.contains(id) {
+            fetch_artist_ids.push(*id);
+        }
+    }
+    for id in &contributing_artist_ids {
         if !fetch_artist_ids.contains(id) {
             fetch_artist_ids.push(*id);
         }
@@ -201,7 +209,15 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     let catalog = state.catalog.read().unwrap();
     let term = if search.is_empty() { None } else { Some(search) };
     let found = if ids.is_empty() {
-        catalog.query(&types, parent, term, favorites_only, &artist_ids, &album_artist_ids)
+        catalog.query(
+            &types,
+            parent,
+            term,
+            favorites_only,
+            &artist_ids,
+            &album_artist_ids,
+            &contributing_artist_ids,
+        )
     } else {
         ids.iter()
             .filter_map(|id| catalog.item(*id))
@@ -268,7 +284,7 @@ type MaybeItem = Result<Json<BaseItemDto>, Status>;
 async fn artist_index(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
     let catalog = state.catalog.read().unwrap();
     let term = query.search_term.as_deref().filter(|term| !term.is_empty());
-    let found = catalog.query(&["MusicArtist"], None, term, false, &[], &[]);
+    let found = catalog.query(&["MusicArtist"], None, term, false, &[], &[], &[]);
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
     let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();

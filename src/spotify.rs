@@ -603,7 +603,18 @@ fn add_saved_album(catalog: &mut Catalog, raw: &Value) {
     let year = raw.get("year").and_then(Value::as_i64).map(|value| value as i32);
     catalog.saved_albums.insert(id);
     match catalog.albums.get_mut(&id) {
-        Some(album) => album.year = album.year.or(year),
+        Some(album) => {
+            // Playlist ingestion can create this album first using a track's
+            // artists, which may include featured artists. Replace that
+            // fallback with the album's authoritative artist list.
+            if !artist_ids.is_empty() {
+                album.artist_ids = artist_ids;
+            }
+            album.year = album.year.or(year);
+            if album.image.is_none() {
+                album.image = image_of(raw.get("image"));
+            }
+        }
         None => {
             catalog.albums.insert(id, Album {
                 id,
@@ -956,6 +967,39 @@ pub fn absorb_virtual_playlist(catalog: &mut Catalog, playlist_id: Uuid, raw: &V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_album_artists_replace_playlist_track_artists() {
+        let catalog = parse_catalog(&serde_json::json!({
+            "playlists": [{
+                "uri": "spotify:playlist:test",
+                "name": "Playlist",
+                "tracks": [{
+                    "uri": "spotify:track:test",
+                    "name": "Track",
+                    "album": {
+                        "uri": "spotify:album:test",
+                        "name": "Album"
+                    },
+                    "artists": [
+                        {"uri": "spotify:artist:main", "name": "Main"},
+                        {"uri": "spotify:artist:feature", "name": "Feature"}
+                    ]
+                }]
+            }],
+            "albums": [{
+                "uri": "spotify:album:test",
+                "name": "Album",
+                "artists": [
+                    {"uri": "spotify:artist:main", "name": "Main"}
+                ],
+                "tracks": []
+            }]
+        })).unwrap();
+
+        let album = catalog.albums.get(&catalog::stable_id("spotify:album:test")).unwrap();
+        assert_eq!(album.artist_ids, vec![catalog::stable_id("spotify:artist:main")]);
+    }
 
     #[tokio::test]
     async fn playlist_cache_round_trip() {
