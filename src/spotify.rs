@@ -191,7 +191,7 @@ pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| {
-                (name.starts_with("playlist-") || name.starts_with("track-") || name.starts_with("album-"))
+                (name.starts_with("playlist-") || name.starts_with("track-"))
                     && name.ends_with(".json")
             })
         {
@@ -209,15 +209,7 @@ pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("track-"));
             let id = catalog::stable_id(value.get("uri").and_then(Value::as_str).unwrap());
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("album-"))
-            {
-                for track in array_of(value.get("tracks")) {
-                    add_track(&mut catalog, track);
-                }
-            } else if remote {
+            if remote {
                 if ingest_track(&mut catalog, &value).is_some() {
                     catalog.mark_remote_track(id);
                 }
@@ -270,6 +262,16 @@ pub async fn cache_album_tracks(cache_dir: &Path, album_uri: &str, tracks: &[Val
     let temporary = cache_dir.join(format!("album-{id}.json.tmp"));
     tokio::fs::write(&temporary, json).await.map_err(|error| error.to_string())?;
     tokio::fs::rename(&temporary, &path).await.map_err(|error| error.to_string())
+}
+
+/// Reads a previously fetched album without adding it to the catalog. Album
+/// caches are intentionally loaded lazily when a client opens the album.
+pub async fn load_cached_album(cache_dir: &Path, album_uri: &str) -> Option<Vec<Value>> {
+    let id = catalog::stable_id(album_uri);
+    let path = cache_dir.join(format!("album-{id}.json"));
+    let raw = tokio::fs::read_to_string(path).await.ok()?;
+    let value = serde_json::from_str::<Value>(&raw).ok()?;
+    Some(value.get("tracks")?.as_array()?.clone())
 }
 
 const SEARCH_JS: &str = r#"
@@ -965,11 +967,8 @@ mod tests {
         })];
 
         cache_album_tracks(&cache_dir, "spotify:album:cached-album", &tracks).await.unwrap();
-        let restored = load_playlist_cache(&cache_dir).await;
-        let album_id = catalog::stable_id("spotify:album:cached-album");
-        let track_id = catalog::stable_id("spotify:track:cached-album-track");
-        assert_eq!(restored.albums.get(&album_id).unwrap().name, "Cached album");
-        assert_eq!(restored.tracks.get(&track_id).unwrap().album_id, Some(album_id));
+        let restored = load_cached_album(&cache_dir, "spotify:album:cached-album").await.unwrap();
+        assert_eq!(restored, tracks);
 
         tokio::fs::remove_dir_all(&cache_dir).await.unwrap();
     }

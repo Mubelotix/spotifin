@@ -118,19 +118,26 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     if let Some(album_uri) = parent.and_then(|id| {
         state.catalog.read().unwrap().albums.get(&id).map(|album| album.uri.clone())
     }) {
-        match crate::spotify::album_tracks(&state.bridge, &album_uri).await {
-            Ok(results) => {
-                {
-                    let mut catalog = state.catalog.write().unwrap();
-                    for track in &results {
-                        crate::spotify::ingest_track(&mut catalog, track);
+        let results = match crate::spotify::load_cached_album(&state.audio.cache, &album_uri).await {
+            Some(results) => results,
+            None => match crate::spotify::album_tracks(&state.bridge, &album_uri).await {
+                Ok(results) => {
+                    if let Err(error) = crate::spotify::cache_album_tracks(&state.audio.cache, &album_uri, &results).await {
+                        eprintln!("could not cache album {album_uri}: {error}");
                     }
+                    results
                 }
-                if let Err(error) = crate::spotify::cache_album_tracks(&state.audio.cache, &album_uri, &results).await {
-                    eprintln!("could not cache album {album_uri}: {error}");
+                Err(error) => {
+                    eprintln!("album fetch failed for {album_uri}: {error}");
+                    Vec::new()
                 }
+            },
+        };
+        if !results.is_empty() {
+            let mut catalog = state.catalog.write().unwrap();
+            for track in &results {
+                crate::spotify::ingest_track(&mut catalog, track);
             }
-            Err(error) => eprintln!("album fetch failed for {album_uri}: {error}"),
         }
     }
 
