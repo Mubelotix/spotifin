@@ -30,8 +30,17 @@ pub struct UserDto {
 #[serde(rename_all = "PascalCase")]
 pub struct AuthResult {
     pub user: UserDto,
+    pub session_info: SessionInfo,
     pub access_token: &'static str,
     pub server_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SessionInfo {
+    pub id: &'static str,
+    pub play_state: Value,
+    pub now_playing_item: Option<Value>,
 }
 
 fn dto() -> UserDto {
@@ -50,6 +59,11 @@ pub fn authenticate(body: Json<Value>) -> Json<AuthResult> {
     let _ = body; // single static user; credentials are accepted as-is
     Json(AuthResult {
         user: dto(),
+        session_info: SessionInfo {
+            id: "spotify-mcp",
+            play_state: serde_json::json!({}),
+            now_playing_item: None,
+        },
         access_token: ACCESS_TOKEN,
         server_id: user_id().to_string(),
     })

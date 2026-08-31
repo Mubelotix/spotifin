@@ -12,6 +12,8 @@ The supported Jellyfin music clients are:
 - **CassetteCat**: https://github.com/samyyy2311/CassetteCat
 - **Wavio**: https://github.com/Joel-Mercier/wavio
 - **Linthra**: https://github.com/TheZupZup/Linthra
+- **Coppelia**: https://github.com/j6k4m8/coppelia
+- **JellyBoxPlayer**: https://github.com/avdept/JellyBoxPlayer
 
 They can point at this server, browse the Spotify account like a local library (playlists, Liked Songs, saved albums, followed artists), and play tracks with correct lengths, seeking, favorites, playlists and lyrics. Finamp, Fintunes and Yuzic also search **all of Spotify** through the server's remote search path. Agents may freely clone these repositories when they need to inspect client behavior, request formats, or compatibility expectations.
 

@@ -9,6 +9,8 @@ controllers and DTOs, and on actual client code from:
 - `samyyy2311/CassetteCat`
 - `Joel-Mercier/wavio`
 - `TheZupZup/Linthra`
+- `j6k4m8/coppelia`
+- `avdept/JellyBoxPlayer`
 
 The repositories were cloned under `/tmp/target-research/`. This is a behavioral
 target, not a copy of Jellyfin's internal implementation. The server API is
