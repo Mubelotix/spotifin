@@ -23,6 +23,7 @@ pub struct AppState {
     pub catalog: std::sync::Arc<std::sync::RwLock<catalog::Catalog>>,
     pub bridge: bridge::BridgeState,
     pub player: player::PlayerControl,
+    pub control: jellyfin::control::ControlState,
 }
 
 fn data_dir() -> PathBuf {
@@ -104,6 +105,7 @@ async fn rocket() -> _ {
         catalog: Arc::new(std::sync::RwLock::new(cached_catalog)),
         bridge: bridge::BridgeState::default(),
         player: player::PlayerControl::default(),
+        control: jellyfin::control::ControlState::default(),
     };
 
     if let Err(error) = tokio::fs::create_dir_all(&hls).await {

@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod control;
 pub mod dto;
 pub mod images;
 pub mod lyrics;
@@ -22,6 +23,10 @@ pub fn routes() -> Vec<Route> {
         auth::get_user,
         auth::get_me,
         auth::logout,
+        control::capabilities,
+        control::sessions,
+        control::playstate,
+        control::socket,
         items::views,
         items::user_views,
         items::media_folders,
