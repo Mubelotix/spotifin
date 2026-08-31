@@ -162,7 +162,7 @@ pub struct CreatePlaylistQuery {
 /// Creates the playlist inside Spotify itself; the returned URI is the
 /// canonical identity of the new playlist. Wavio sends the fields as query
 /// parameters, while other clients send a JSON body.
-#[post("/Playlists?<query..>", format = "json", data = "<body>")]
+#[post("/Playlists?<query..>", data = "<body>")]
 pub async fn create_playlist(
     query: CreatePlaylistQuery,
     body: Option<Json<Value>>,
