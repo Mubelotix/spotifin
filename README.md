@@ -34,74 +34,34 @@ Use existing open-source apps, or build new experiences on top of the open API.
 
 ## Quick Start
 
-### Open the services
+1. Create a directory for persistent data and start the image:
 
-| Address | Purpose |
-|---|---|
-| `https://localhost:8031` | Selkies streamed Spotify desktop, recommended |
-| `http://localhost:8030` | Alternate browser endpoint |
-| `http://localhost:8032` | Jellyfin server URL for compatible clients |
-
-1. Open `https://localhost:8031` and sign in to the desktop with `spotify` / `spotify`.
-2. Sign in to Spotify inside the streamed desktop session.
-3. Wait for the library collector to finish its first pass.
-4. Configure your Jellyfin client with `http://<host>:8032`. If it asks for credentials, the default pair is `spotify` / `spotify`.
-
-The Selkies endpoint may use a locally generated certificate, so a browser
-warning on the first visit is expected. If a client cannot connect, use port
-`8032`, not the browser desktop port.
-
-> [!WARNING]
-> The included authentication is intentionally minimal and the launcher
-> publishes the Jellyfin API on port `8032`. Keep it on a trusted network or
-> place it behind your own firewall, reverse proxy, and authentication layer
-> before exposing it to the internet.
-
-> [!NOTE]
-> The image does not contain the Spotify client itself. On first boot the
-> container downloads it (~130 MB) from Spotify's official apt repository and
-> stores it in `/config/spotify-client`, where it persists across restarts and
-> container recreations. Delete that folder to force a fresh download.
-
-## Cache Structure
-
-We store data as files, so it's easy to process for the few of you that need it.
-
-```text
-/config/
-├── recording.aac
-├── spotify-client/
-│   └── usr/…            # Spotify desktop client, downloaded on first boot
-├── cache/
-│   ├── <id>.aac
-│   ├── playlist-<id>.json
-│   ├── track-<id>.json
-│   ├── album-<id>.json
-│   ├── artist-<id>.json
-│   └── lyrics-<id>.json
-└── hls/
-    ├── main.m3u8
-    └── segment-*.ts
+```bash
+mkdir -p data
+docker run \
+  --name spotifin \
+  --restart unless-stopped \
+  -p 127.0.0.1:8030:3000 \
+  -p 127.0.0.1:8032:8000 \
+  --device /dev/dri \
+  --shm-size=1g \
+  -v "$(pwd)/data:/config" \
+  ghcr.io/mubelotix/spotifin:latest
 ```
 
-- `recording.aac` is the shared live capture. It is continuously replaced as
-  Spotify switches tracks and should not be treated as a completed recording.
-- `<id>.aac` contains completed track captures. The first request
-  for an uncached track starts a live capture; later requests can be served
-  directly from this file.
-- `playlist-*.json` stores playlist snapshots so the catalog can come back
-  quickly while Spotify is still starting.
-- `track-*.json` stores tracks discovered through remote search, allowing them
-  to remain playable after a restart.
-- `album-*.json` and `artist-*.json` store album track lists and artist
-  discographies fetched when those pages are opened.
-- `lyrics-*.json` stores lyrics fetched for a track's first lyrics request.
-- `hls/` contains the live HLS playlist and segments used by clients that
-  request HLS playback. It is operational state, not the permanent audio cache.
+To make files in `data` owned by a specific host user, also add `-e PUID=... -e PGID=...`; the image defaults to UID and GID `911`.
 
-The IDs in filenames are stable UUIDs derived from Spotify URIs, not readable
-track titles. Temporary `.tmp` files may briefly appear while JSON cache files
-are being written safely.
+2. Access https://localhost:8030 and log into your Spotify account.
+3. Wait for the library collector to finish its first pass.
+4. Configure your Jellyfin client with `http://<host>:8032`.
+
+> [!WARNING]
+> The included authentication is intentionally minimal. Keep it on a trusted network or place it behind your own firewall, reverse proxy, and authentication layer before exposing it to the internet.
+
+> [!NOTE]
+> The image does not contain the Spotify client itself.
+> On first boot the container downloads it (~130 MB) from Spotify's official apt repository and stores it in `/config/spotify-client`, where it persists across restarts and container recreations.
+> Delete that folder to force a fresh download.
 
 ## Client Support
 
@@ -157,6 +117,46 @@ Once the container is running, the backend can be rebuilt and reinjected into th
 ```bash
 ./dev-backend.sh
 ```
+
+## Cache Structure
+
+We store data as files, so it's easy to process for the few of you that need it.
+
+```text
+/config/
+├── recording.aac
+├── spotify-client/
+│   └── usr/…            # Spotify desktop client, downloaded on first boot
+├── cache/
+│   ├── <id>.aac
+│   ├── playlist-<id>.json
+│   ├── track-<id>.json
+│   ├── album-<id>.json
+│   ├── artist-<id>.json
+│   └── lyrics-<id>.json
+└── hls/
+    ├── main.m3u8
+    └── segment-*.ts
+```
+
+- `recording.aac` is the shared live capture. It is continuously replaced as
+  Spotify switches tracks and should not be treated as a completed recording.
+- `<id>.aac` contains completed track captures. The first request
+  for an uncached track starts a live capture; later requests can be served
+  directly from this file.
+- `playlist-*.json` stores playlist snapshots so the catalog can come back
+  quickly while Spotify is still starting.
+- `track-*.json` stores tracks discovered through remote search, allowing them
+  to remain playable after a restart.
+- `album-*.json` and `artist-*.json` store album track lists and artist
+  discographies fetched when those pages are opened.
+- `lyrics-*.json` stores lyrics fetched for a track's first lyrics request.
+- `hls/` contains the live HLS playlist and segments used by clients that
+  request HLS playback. It is operational state, not the permanent audio cache.
+
+The IDs in filenames are stable UUIDs derived from Spotify URIs, not readable
+track titles. Temporary `.tmp` files may briefly appear while JSON cache files
+are being written safely.
 
 ## Advanced Spicetify Configuration
 
