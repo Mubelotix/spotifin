@@ -80,31 +80,33 @@ fn audio_stream(path: Arc<PathBuf>, session: Option<player::CaptureSession>) -> 
     )
 }
 
-async fn open_audio_stream(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
-    let deadline = match uuid::Uuid::parse_str(item_id) {
-        Ok(id) => {
-            player::prepare(state.inner(), id, &state.audio.recording).await;
-            state.player.session_for(id).await
-        }
-        Err(_) => None,
+async fn open_audio_stream(state: &State<crate::AppState>, item_id: &str) -> Result<AudioResponse, rocket::http::Status> {
+    let Ok(id) = uuid::Uuid::parse_str(item_id) else {
+        return Err(rocket::http::Status::NotFound);
     };
-    audio_stream(state.audio.recording.clone(), deadline)
+    let known = state.catalog.read().unwrap().tracks.contains_key(&id);
+    if !known {
+        return Err(rocket::http::Status::NotFound);
+    }
+    player::prepare(state.inner(), id, &state.audio.recording).await;
+    let session = state.player.session_for(id).await;
+    Ok(audio_stream(state.audio.recording.clone(), session))
 }
 
 /// All audio items stream the shared live recording; requesting a known item
 /// switches the client to that track first.
 #[get("/Audio/<item_id>/universal")]
-pub async fn universal(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
+pub async fn universal(state: &State<crate::AppState>, item_id: &str) -> Result<AudioResponse, rocket::http::Status> {
     open_audio_stream(state, item_id).await
 }
 
 #[get("/Audio/<item_id>/File")]
-pub async fn file_alias(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
+pub async fn file_alias(state: &State<crate::AppState>, item_id: &str) -> Result<AudioResponse, rocket::http::Status> {
     open_audio_stream(state, item_id).await
 }
 
 #[get("/Audio/<item_id>/stream")]
-pub async fn stream_alias(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
+pub async fn stream_alias(state: &State<crate::AppState>, item_id: &str) -> Result<AudioResponse, rocket::http::Status> {
     open_audio_stream(state, item_id).await
 }
 
