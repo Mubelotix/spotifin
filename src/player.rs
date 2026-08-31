@@ -19,6 +19,7 @@ struct PlayerInner {
     last_switch: Mutex<Option<Instant>>,
     requested_item: Mutex<Option<uuid::Uuid>>,
     session: Mutex<Option<CaptureSession>>,
+    switching: Mutex<bool>,
     live_streams: AtomicUsize,
     last_activity: StdMutex<Option<Instant>>,
     idle_paused: StdMutex<bool>,
@@ -247,7 +248,7 @@ pub async fn prepare(
     // current stream contain the wrong track. A real skip closes the old
     // stream first, so use that boundary rather than blocking for the song's
     // full duration.
-    if *last != Some(item_id) && state.player.has_live_stream() && probe {
+    if *last != Some(item_id) && state.player.has_live_stream() {
         return false;
     }
     // Native players probe several queued URLs immediately after a selection.
@@ -266,6 +267,19 @@ pub async fn prepare(
         return false;
     }
 
+    let Ok(mut switching) = state.player.inner.switching.try_lock() else {
+        // Do not queue competing selections behind an in-flight Spotify
+        // switch. A queued request would become a second selection when the
+        // first one finishes and make the player oscillate.
+        return false;
+    };
+    if *last != Some(item_id) && *switching {
+        return false;
+    }
+    if *last != Some(item_id) {
+        *switching = true;
+    }
+
     // Invalidate readers of the old shared recording before resetting it. Their
     // next loop iteration will observe the missing session and stop instead of
     // consuming bytes from the new track.
@@ -280,6 +294,7 @@ pub async fn prepare(
             if generation.is_some_and(|generation| {
                 state.player.inner.switch_generation.load(Ordering::Acquire) != generation
             }) {
+                *switching = false;
                 return false;
             }
             let capture_start = Instant::now();
@@ -289,12 +304,14 @@ pub async fn prepare(
                 Ok(title) => title,
                 Err(error) => {
                     eprintln!("could not verify playback of {uri}: {error}");
+                    *switching = false;
                     return true;
                 }
             };
             if generation.is_some_and(|generation| {
                 state.player.inner.switch_generation.load(Ordering::Acquire) != generation
             }) {
+                *switching = false;
                 return false;
             }
             eprintln!("verified now playing: {title}");
@@ -304,6 +321,7 @@ pub async fn prepare(
                 Some(CaptureSession { item: item_id, min_end, expected_bytes });
             *last = Some(item_id);
             *state.player.inner.last_switch.lock().await = Some(Instant::now());
+            *switching = false;
             // Park the finished capture in the cache once the song is over.
             tokio::spawn(save_to_cache(
                 recording.to_path_buf(),
@@ -314,7 +332,10 @@ pub async fn prepare(
                 state.player.clone(),
             ));
         }
-        Err(error) => eprintln!("could not play {uri}: {error}"),
+        Err(error) => {
+            *switching = false;
+            eprintln!("could not play {uri}: {error}");
+        }
     }
     true
 }
