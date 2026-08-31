@@ -1,24 +1,23 @@
 # spotify-mcp
 
-Spotify + Spicetify running in a rootless podman container, streamed to the browser via LinuxServer's Selkies baseimage (no X11/PulseAudio bridging with the host).
+A Jellyfin-compatible music server backed by a **real Spotify desktop client** running in a rootless podman container (LinuxServer Selkies baseimage, session streamed to the browser). The Rust backend speaks the Jellyfin API; the audio it serves is whatever Spotify actually plays, captured from PulseAudio by ffmpeg.
 
-## Files
+## Goal
 
-Keep the file count minimal:
+Any Jellyfin music client (Finamp, Fintunes) can point at this server, browse the Spotify account like a local library (playlists, Liked Songs, saved albums, followed artists), search **all of Spotify**, and play tracks with correct lengths, seeking, favorites, playlists and lyrics.
 
-- `Containerfile` — everything container-related lives here. Inline any container config (openbox autostart, init scripts, wrappers) into the Containerfile with `RUN printf '%s\n' ...` instead of creating `root/` files (podman 4.9 does not support Dockerfile heredocs).
-- `run-spotify.sh` — the only helper script: builds nothing, just runs the container.
-- `TARGET.md` — implementation target and compatibility reference for the Jellyfin music API.
+Core idea: the backend never talks to spotify.com. It drives the logged-in client from inside its own renderer (via a WebSocket to the `bridge.js` Spicetify extension) using the same internal APIs the UI uses — indistinguishable from a human clicking around.
 
-## Preferences
+## Resources
 
-- Communicate in English for this project.
-- Don't leave temp/debug files hanging around in the repo.
-- LSIO baseimage specifics that matter (don't relearn these the hard way):
-  - Custom init scripts go to `/custom-cont-init.d/*.sh`, app autostart to `/defaults/autostart`.
-  - `/config` is the persistent volume; anything root-owned left there prevents the Spotify window from mapping (black screen) — the init script chowns it to `abc` at boot.
-  - Stale `/config/.cache/spotify/Singleton*` and `pending/` locks make Spotify crash silently at startup — cleaned at every boot.
-  - Spotify needs a D-Bus session (`dbus-launch`) or its main loop busy-spins at 100% CPU with the window never mapping.
+- `TARGET.md` — behavioral spec of the Jellyfin API subset (derived from Jellyfin server, Finamp, jellyfin-audio-player sources).
+- `spicetify-dev-docs.md` — vendored spicetify development docs (Platform, CosmosAsync, GraphQL), one greppable file, sections delimited by `=== <path> ===`. Docs drift: verify against the live client before relying on anything.
+- `bridge.js` — Spicetify extension; connects to `ws://127.0.0.1:8000/ws`, reconnects every 2 s, evaluates JS sent by the backend (`POST /debug/eval`, gated by `DEBUG_EVAL`) and returns results as JSON.
+- `src/catalog.rs` — in-memory model; stable UUIDv5 item IDs derived from Spotify URIs.
+- `src/spotify.rs` — collector (builds the catalog by evaluating scripts in the renderer) plus live helpers: search, playlist mutations, lyrics.
+- `src/player.rs` — on-demand playback, recorder resets, idle watchdog.
+- `src/jellyfin/` — HTTP endpoints, mounted under both `/api` and `/`.
+- `Containerfile` / `run-spotify.sh` — everything container-related lives in the Containerfile (inline config with `RUN printf '%s\n' ...`; podman 4.9 has no heredocs). Keep the file count minimal.
 
 ## Usage
 
@@ -27,63 +26,31 @@ podman build -t spicetify-web .
 ./run-spotify.sh   # then open https://localhost:8031 (user: spotify, password: spotify)
 ```
 
-## Spicetify plugins
+Spicetify plugins are env vars on `run-spotify.sh`: `SPICETIFY_EXTENSIONS` (default `adblock.js bridge.js`), `SPICETIFY_CUSTOM_APPS`, `SPICETIFY_THEME`.
 
-Plugins are configured with env vars in `run-spotify.sh` (space-separated lists), applied by the init script at every boot:
+## How it works
 
-- `SPICETIFY_EXTENSIONS` (default `adblock.js bridge.js`; `adblock.js` is auto-downloaded from rxri/spicetify-extensions, project extensions like `bridge.js` are COPY'd into `/opt/spicetify/Extensions/` at build time and installed by the init script)
-- `SPICETIFY_CUSTOM_APPS` (e.g. `lyrics-plus new-releases`)
-- `SPICETIFY_THEME`
+- **Catalog**: populated by one collector script evaluated in the renderer (rootlist playlists, Liked Songs via `PlaylistAPI.getPlaylist("spotify:user:me:collection")`, saved albums via `GraphQL getAlbum`/`tracksV2`, followed artists via `LibraryAPI.getContents`). Refreshed at boot and every 15 min; refreshes **merge**, never replace (search-ingested tracks and user data survive).
+- **Search**: `SearchTerm` queries also hit Spotify search in the renderer; results are ingested with stable IDs, so any track on Spotify becomes playable by ID.
+- **Playback**: an audio request for a known item navigates to `/track/{id}`, presses play, verifies via `PlayerAPI.getState`, then resets the recorder. Responses end after exactly the track's expected byte count (recorder runs 192 kbps CBR). Byte-range requests and HEAD supported for seek bars.
+- **Idle watchdog**: after `PLAYBACK_IDLE_TIMEOUT_SECS` (default 600) without requests, pause + drain the queue — pausing alone loses the race against autoplay advancing between tracks. Never fires mid-capture, so pauses land at song boundaries.
+- **User data**: favorites stored server-side; playback reports update counts/position/last-played (informational only — the Spotify client owns the real cursor).
+- **Playlists**: create/add/remove/reorder are real client operations, synced both ways.
+- Auth is a stub: one static user, any credentials accepted. Lyrics come from the client's color-lyrics endpoint.
 
-```bash
-SPICETIFY_EXTENSIONS="adblock.js fullAppDisplay.js" SPICETIFY_CUSTOM_APPS="lyrics-plus" ./run-spotify.sh
-```
+## Hard-won API lessons (verified live)
 
-The resulting config is persisted in `./data/spicetify/config-xpui.ini`. Manual CLI config also works but must run as abc with HOME=/config — spicetify refuses root, and root-owned output files cause the black-screen bug:
+- `api.spotify.com` is blocked from this client ("Failed to fetch"); the internal Platform APIs and `spclient.wg.spotify.com` work fine via CosmosAsync.
+- Rocket query/form guards match field names case-sensitively: always declare `#[field(name = "PascalCase")]`.
+- Playlist ops: create via `RootlistAPI.applyModification({operation:"create",createItemKind:1,name})`; add/remove/move via `PlaylistAPI.add/remove/move(uri, rows, {})` — the `{}` options argument is mandatory. Move anchors accept `"start"`, `"end"` or row objects with `uid`; a bare URI string silently degrades to move-to-top.
+- Never hold a catalog lock across a bridge await; re-read playlists after mutations instead of predicting state.
 
-```bash
-alias spicetify='podman exec -u abc -e HOME=/config -e SPICETIFY_CONFIG=/config/spicetify spotify spicetify'
-```
+## Container lessons
 
-Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/spicetify/CustomApps/` (lyrics-plus, new-releases, reddit). More via the spicetify Marketplace.
-
-## Jellyfin API
-
-`TARGET.md` documents the Jellyfin music API required for a compatible reimplementation. It is based on the Jellyfin server, Finamp, and jellyfin-audio-player sources cloned under `/tmp/target-research/`. A first implementation now exists in Rust (`src/jellyfin/`), see "Implementation decisions" below.
-
-## Spicetify development docs
-
-`spicetify-dev-docs.md` vendors the spicetify/docs development section (api-wrapper, Platform, CosmosAsync, GraphQL) as one greppable file; sections are delimited by `=== <path> ===` lines. It documents Spotify's internal client APIs, which `bridge.js` exposes through `/debug/eval`. Docs drift: verify everything against the live client before relying on it.
-
-## Implementation decisions
-
-- Ignore authentication. Spotify is assumed to already be connected.
-- The instance has exactly one static user.
-- Keep Spotify API queries to a minimum. Prefer clicking in the Spotify application and reading the resulting visual state, as this should be less detectable as bot activity. Make exceptions only when necessary.
-- Playback progress is not important for now. Jellyfin progress may always be reported as zero; do not manage Spotify's playback cursor for this purpose.
-- Spotify Daily playlists and all Spotify playlists visible on the Spotify home page should be available to Jellyfin clients. Prefer representing them as classic playlists if Instant Mix cannot provide multiple separate mixes.
-- Lyrics are available through Spotify's interface using the microphone button.
-- Audio is known to stream through the Selkies interface when Spotify is playing inside the container. The audio recording/streaming location is undecided: it may be in the Spicetify extension, in the Rust backend, or outside the container, and may use the Selkies API itself.
-- A Rust backend is acceptable and will open the HTTP port, answer HTTP requests, and communicate with the Spicetify extension through a WebSocket. The extension is `bridge.js`; it connects to `ws://127.0.0.1:8000/ws` (Rocket `rocket_ws` route) and reconnects every 2s until the link comes back.
-- `POST /debug/eval` sends its body as JavaScript to the bridge for evaluation in the Spotify renderer and returns the result as JSON (`{type:"result",id,ok,value|error}`). Gated by `DEBUG_EVAL` (default off → 403; `run-spotify.sh` sets it). 503 when no bridge is connected, 400 if evaluation threw, 504 after 10s without an answer.
-- The Jellyfin catalog lives in `src/catalog.rs` (artists/albums/tracks/playlists, stable UUIDv5 ids derived from Spotify URIs). `src/spotify.rs` populates it by evaluating one collector script in the renderer via the bridge: rootlist playlists, Liked Songs (`PlaylistAPI.getPlaylist("spotify:user:me:collection")` — username part is ignored), saved albums with tracks (`Spicetify.GraphQL` `getAlbum`, field `tracksV2`), followed artists (`LibraryAPI.getContents`). A background task refreshes it at boot and every 15 min.
-- Jellyfin endpoints are in `src/jellyfin/*`, mounted under both `/api` and `/`. Implemented: auth stub (static user, any credentials accepted), `/Users/{id}/Views`, the `/Users/{id}/Items` query engine (types/parent/search/pagination), item detail, playlists (read/create/add/remove), favorites, PlaybackInfo, Instant Mix (random tracks), artwork redirects to `i.scdn.co`. Audio routes stream the shared recording for every track id.
-- Playback on demand: audio requests for known items make the client play that track (`src/player.rs`: navigate to `/track/{id}`, `Spicetify.Player.playUri`, verify via `PlayerAPI.getState`), then reset the recorder by killing only the ffmpeg writer (anchored pkill — never match the supervisor shell, or the respawn loop dies silently). The recorder is 192 kbps CBR, so a capture session ends after exactly the track's expected byte count; unknown item IDs return 404.
-- Idle watchdog: after `PLAYBACK_IDLE_TIMEOUT_SECS` (default 300) without any audio request, the client is paused and its queue drained (`PlayerAPI.clearQueue` — pausing alone loses the race against autoplay advancing between tracks). The watchdog never fires while a capture session is live, so pauses only land at song boundaries.
-- Remote search: `SearchTerm` queries also hit Spotify from the renderer (`GraphQL searchSuggestions`, note `duration.totalMilliseconds`) and ingest results into the catalog with stable UUIDv5 ids. Catalog refreshes must merge (`Catalog::merge`), not replace, or ingested tracks and favorites are wiped.
-- Lyrics (`GET /Audio/{id}/Lyrics`, `src/jellyfin/lyrics.rs`) are fetched live through the bridge from `https://spclient.wg.spotify.com/color-lyrics/v2/track/{id}` via CosmosAsync — spclient IS reachable even though api.spotify.com is not. Returns 404 for local files and instrumental tracks.
-- Audio routes accept single-range `Range` requests (206 + `Content-Range` against the track's expected byte size) and answer HEAD via Rocket's automatic GET handling; this is what makes client seek bars work.
-- Spotify Web API calls through CosmosAsync get 429 "Failed to fetch" from this client — use internal Platform APIs instead.
-- Playlist mutations are real client operations: create via `RootlistAPI.applyModification({operation:"create",createItemKind:1,...})`, add/remove via `PlaylistAPI.add/remove(uri, rows, {})` (the `{}` options arg is mandatory), reorder via `PlaylistAPI.move` — whose `{before}/{after}` anchors accept `"start"`, `"end"` or row objects with `uid` (a bare URI string silently no-ops to "top"). Entry ids derive from Spotify row uids so they survive reorders. After any mutation, re-read the playlist (`fetch_playlist`) before absorbing it — never hold a catalog lock across a bridge await.
-- Album/artist browsing follows Spotify's "Your Library" semantics: only explicitly saved albums and followed artists are listed, even though track→album/artist metadata is kept for every library track.
-
-## Hard-won container lessons
-
-- `/defaults` MUST end up owned by `abc`. `init-adduser` does `lsiown abc:abc /defaults`, but a boot race can leave it root-owned (`700 root root`). When `abc` cannot traverse `/defaults`, PulseAudio fails to start ("Failed to create secure directory (/defaults)") and every Pulse client breaks (Selkies audio, Spotify sound). The init script runs a detached watchdog loop that re-runs `lsiown -R abc:abc /defaults` until the owner is right.
-- s6 kills background processes spawned from `custom-cont-init.d/*.sh` when the init phase ends, even with `&`. Long-lived helpers started there must be detached with `setsid nohup sh -c '...' >/dev/null 2>&1 &`.
-- LSIO copies `/defaults/autostart` to `/config/.config/openbox/autostart` only on FIRST boot; the persistent volume keeps a stale copy forever. The init script re-syncs it (`cat /defaults/autostart > ...`) on every boot.
-- The audio recorders are plain `ffmpeg -f pulse -i default` processes spawned by the init script (as root), waiting for `/defaults/native` to appear first, retrying forever if they die. Two independent processes: one `-f adts` into `/config/audio/recording.aac`, one `-f hls` (event playlist, 6s segments) into `/config/audio/hls/`. Do NOT use the ffmpeg `tee` muxer to combine them: the adts branch stays at 0 bytes while HLS writes.
-- ffmpeg buffers regular-file output (~256 KB): `recording.aac` grows in bursts while HLS segments appear in real time. `/universal` streams from the file tail, so expect bursty delivery.
-- Iterating on the container does NOT require a rebuild: `podman exec` to patch scripts/processes in the running container, and persist logs/state under `/config` so they survive restarts. Rebuild only once a change is validated.
-- The Rust backend binary is `spotify-server` (renamed from spotify-mcp). Its build is deliberately the LAST stage of the Containerfile so app changes don't invalidate the Spotify/Spicetify layers.
-- Debian trixie ships rustc 1.85; the `time` crate must be pinned (`cargo update -p time --precise 0.3.36`) or `cargo build --locked` fails inside the image.
+- Custom init scripts go to `/custom-cont-init.d/*.sh`, app autostart to `/defaults/autostart`.
+- Root-owned leftovers under `/config` or `/defaults` break everything (black screen, PulseAudio failure). The init script chowns both to `abc` at boot, with a detached loop that keeps re-fixing `/defaults`.
+- Stale `/config/.cache/spotify/Singleton*` and `pending/` locks crash Spotify silently at startup — cleaned every boot. Spotify also needs `dbus-launch` or it busy-spins at 100 % CPU.
+- s6 kills background processes started from init scripts when the phase ends, even with `&` — detach long-lived helpers with `setsid nohup sh -c '...' >/dev/null 2>&1 &`.
+- Two independent recorders: `-f adts` into `recording.aac` (what we stream) and `-f hls` into `/config/audio/hls/`. Never combine them with ffmpeg's `tee` muxer (adts stays empty). ffmpeg buffers file output ~256 KB → bursty delivery. Recorder resets kill only the ffmpeg writer (anchored pkill — matching the supervisor shell kills the respawn loop).
+- Iterate without rebuilding: `podman exec` into the running container, persist state under `/config`. Rebuild only once validated. The Rust build is deliberately the LAST Containerfile stage.
+- Debian trixie ships rustc 1.85; pin `time` (`cargo update -p time --precise 0.3.36`) or `--locked` builds fail inside the image.
