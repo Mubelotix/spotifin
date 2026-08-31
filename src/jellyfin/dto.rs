@@ -67,6 +67,27 @@ pub struct BaseItemDto {
     pub image_tags: Option<ImageTags>,
     pub user_data: Option<UserItemData>,
     pub playlist_item_id: Option<Uuid>,
+    pub media_sources: Option<Vec<MediaSourceDto>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct MediaSourceDto {
+    pub id: Uuid,
+    pub container: &'static str,
+    pub media_streams: Vec<MediaStreamDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct MediaStreamDto {
+    pub index: u8,
+    #[serde(rename = "Type")]
+    pub stream_type: &'static str,
+    pub codec: &'static str,
+    pub bit_rate: u32,
+    pub sample_rate: u32,
+    pub channels: u8,
 }
 
 pub fn lyrics_cache_path(id: Uuid) -> PathBuf {
@@ -167,6 +188,7 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         image_tags: None,
         user_data: Some(user_data(catalog, item.id())),
         playlist_item_id,
+        media_sources: None,
     };
     match item {
         Item::Track(track) => fill_track(catalog, &mut dto, track),
@@ -208,6 +230,18 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
     dto.parent_index_number = Some(track.disc);
     dto.run_time_ticks = Some(track.duration_ms * TICKS_PER_MS);
     dto.container = Some("mp3");
+    dto.media_sources = Some(vec![MediaSourceDto {
+        id: track.id,
+        container: "aac",
+        media_streams: vec![MediaStreamDto {
+            index: 0,
+            stream_type: "Audio",
+            codec: "aac",
+            bit_rate: 192_000,
+            sample_rate: 44_100,
+            channels: 2,
+        }],
+    }]);
     dto.has_lyrics = Some(match std::fs::read(lyrics_cache_path(track.id)) {
         Ok(raw) => serde_json::from_slice::<serde_json::Value>(&raw)
             .ok()
