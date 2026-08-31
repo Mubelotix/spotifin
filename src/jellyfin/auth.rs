@@ -68,10 +68,17 @@ pub fn authenticate(body: Json<Value>) -> Json<AuthResult> {
         user: dto(),
         session_info: SessionInfo {
             id: "spotify-mcp",
-            // Finamp deserializes this object eagerly and requires all three
-            // PlayerStateInfo bools when PlayState is present. An idle session
-            // has no play state, so use null instead.
-            play_state: Value::Null,
+            // Clients deserialize PlayState eagerly, even for an idle session.
+            // Return the standard idle values instead of null.
+            play_state: serde_json::json!({
+                "CanSeek": false,
+                "IsPaused": true,
+                "IsMuted": false,
+                "VolumeLevel": 100,
+                "RepeatMode": "RepeatNone",
+                "ShuffleMode": "Sorted",
+                "PlaybackRate": 1,
+            }),
             now_playing_item: None,
             user_id: user_id().to_string(),
             last_activity_date: "1970-01-01T00:00:00Z",
