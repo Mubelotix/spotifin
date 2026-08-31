@@ -186,13 +186,13 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
             );
             dto.image_tags = image_tag(&playlist.image);
         }
-        Item::Artist(_) => {
+        Item::Artist(artist) => {
             // Fintunes renders artist collections without guarding these
             // fields, even though Jellyfin may omit them for artists.
             dto.artists = Some(Vec::new());
             dto.artist_items = Some(Vec::new());
             dto.album_artists = Some(Vec::new());
-            dto.image_tags = Some(ImageTags { primary: String::new() });
+            dto.image_tags = image_tag(&artist.image);
             dto.run_time_ticks = Some(0);
         }
         _ => {}

@@ -24,6 +24,7 @@ fn image_url_of(state: &State<AppState>, item_id: Uuid) -> Option<String> {
             let album = track.album_id.and_then(|id| catalog.albums.get(&id))?;
             album.image.clone()
         }
+        crate::catalog::Item::Artist(artist) => artist.image.clone(),
         _ => None,
     }
 }

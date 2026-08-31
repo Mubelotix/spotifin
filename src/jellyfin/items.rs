@@ -109,13 +109,19 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     // Fetch an artist's complete discography before filtering, so artist pages
     // are not limited to saved albums or tracks previously seen by the server.
     for artist_id in &fetch_artist_ids {
-        let uri = state.catalog.read().unwrap().artists.get(artist_id).map(|artist| artist.uri.clone());
+        let uri = state.catalog.read().unwrap().artists.get(artist_id).and_then(|artist| {
+            (!artist.discography_loaded).then(|| artist.uri.clone())
+        });
         if let Some(uri) = uri {
             match crate::spotify::artist_tracks(&state.bridge, &uri).await {
                 Ok(results) => {
                     let mut catalog = state.catalog.write().unwrap();
-                    for track in &results {
+                    for track in &results.tracks {
                         crate::spotify::ingest_track(&mut catalog, track);
+                    }
+                    if let Some(artist) = catalog.artists.get_mut(artist_id) {
+                        artist.image = results.image;
+                        artist.discography_loaded = true;
                     }
                 }
                 Err(error) => eprintln!("artist fetch failed for {uri}: {error}"),

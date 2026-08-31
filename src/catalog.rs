@@ -16,6 +16,8 @@ pub struct Artist {
     pub id: Uuid,
     pub uri: String,
     pub name: String,
+    pub image: Option<String>,
+    pub discography_loaded: bool,
 }
 
 #[derive(Clone)]
@@ -177,7 +179,14 @@ impl Catalog {
             fresh.albums.entry(id).or_insert(album);
         }
         for (id, artist) in std::mem::take(&mut self.artists) {
-            fresh.artists.entry(id).or_insert(artist);
+            if let Some(current) = fresh.artists.get_mut(&id) {
+                if current.image.is_none() {
+                    current.image = artist.image;
+                }
+                current.discography_loaded |= artist.discography_loaded;
+            } else {
+                fresh.artists.insert(id, artist);
+            }
         }
         *self = fresh;
     }

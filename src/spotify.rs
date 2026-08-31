@@ -143,7 +143,7 @@ const COLLECT_JS: &str = r#"
                 try { out.albums.push(await dumpAlbum(row.uri, row.name)); }
                 catch (e) { out.errors.push(`album ${row.uri}: ${e}`); }
             } else if (row.type === "artist") {
-                out.artists.push({ uri: row.uri, name: row.name });
+                out.artists.push({ uri: row.uri, name: row.name, image: null });
             }
         }
     } catch (e) {}
@@ -306,6 +306,11 @@ pub async fn search(bridge: &BridgeState, query: &str) -> Result<Vec<Value>, Str
 const ARTIST_TRACKS_JS: &str = r#"
 (async () => {
     const artistUri = ARTIST_URI_PLACEHOLDER;
+    const overview = await Spicetify.GraphQL.Request(
+        Spicetify.GraphQL.Definitions.queryArtistOverview,
+        { uri: artistUri }
+    );
+    const image = overview?.data?.artistUnion?.visuals?.avatarImage?.sources?.[0]?.url || null;
     const releases = await Spicetify.GraphQL.Request(
         Spicetify.GraphQL.Definitions.queryArtistDiscographyAll,
         { uri: artistUri, offset: 0, limit: 2000 }
@@ -337,11 +342,16 @@ const ARTIST_TRACKS_JS: &str = r#"
             });
         }
     }
-    return JSON.stringify(tracks);
+    return JSON.stringify({ tracks, image });
 })()
 "#;
 
-pub async fn artist_tracks(bridge: &BridgeState, artist_uri: &str) -> Result<Vec<Value>, String> {
+pub struct ArtistFetch {
+    pub tracks: Vec<Value>,
+    pub image: Option<String>,
+}
+
+pub async fn artist_tracks(bridge: &BridgeState, artist_uri: &str) -> Result<ArtistFetch, String> {
     let literal = serde_json::to_string(artist_uri).map_err(|e| e.to_string())?;
     let code = ARTIST_TRACKS_JS.replace("ARTIST_URI_PLACEHOLDER", &literal);
     let response = eval_on_bridge(bridge, code).await.map_err(|error| format!("artist fetch failed: {error}"))?;
@@ -349,7 +359,15 @@ pub async fn artist_tracks(bridge: &BridgeState, artist_uri: &str) -> Result<Vec
         .get("value")
         .and_then(Value::as_str)
         .ok_or_else(|| "artist fetch returned no value".to_string())?;
-    serde_json::from_str::<Vec<Value>>(raw).map_err(|error| format!("artist JSON invalid: {error}"))
+    serde_json::from_str::<ArtistFetchRaw>(raw)
+        .map(|result| ArtistFetch { tracks: result.tracks, image: result.image })
+        .map_err(|error| format!("artist JSON invalid: {error}"))
+}
+
+#[derive(serde::Deserialize)]
+struct ArtistFetchRaw {
+    tracks: Vec<Value>,
+    image: Option<String>,
 }
 
 /// Inserts a raw track entry (collector or search shape) if new; either way
@@ -474,7 +492,13 @@ fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
     for artist in array_of(raw.get("artists")) {
         if let (Some(uri), Some(name)) = (str_field(artist, "uri"), str_field(artist, "name")) {
             let id = catalog::stable_id(uri);
-            catalog.artists.entry(id).or_insert(Artist { id, uri: uri.to_string(), name: name.to_string() });
+            catalog.artists.entry(id).or_insert(Artist {
+                id,
+                uri: uri.to_string(),
+                name: name.to_string(),
+                image: None,
+                discography_loaded: false,
+            });
             catalog.followed_artists.insert(id);
         }
     }
@@ -605,7 +629,13 @@ fn artist_ids(catalog: &mut Catalog, raw: Option<&Value>) -> Vec<Uuid> {
             let id = catalog::stable_id(uri);
             let name = str_field(artist, "name").unwrap_or("Unknown artist");
             if !name.is_empty() {
-                catalog.artists.entry(id).or_insert(Artist { id, uri: uri.to_string(), name: name.to_string() });
+                catalog.artists.entry(id).or_insert(Artist {
+                    id,
+                    uri: uri.to_string(),
+                    name: name.to_string(),
+                    image: None,
+                    discography_loaded: false,
+                });
             }
             Some(id)
         })
