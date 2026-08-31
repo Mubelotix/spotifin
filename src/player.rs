@@ -101,7 +101,12 @@ pub async fn prepare(state: &crate::AppState, item_id: uuid::Uuid, recording: &s
     };
 
     let mut last = state.player.last_item.lock().await;
-    if *last == Some(item_id) {
+    let still_capturing = state
+        .player
+        .session_for(item_id)
+        .await
+        .is_some_and(|session| Instant::now() < session.min_end);
+    if *last == Some(item_id) && still_capturing {
         return;
     }
 
