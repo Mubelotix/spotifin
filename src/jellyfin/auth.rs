@@ -117,7 +117,7 @@ pub fn public_system_info() -> Json<Value> {
 pub fn system_info() -> Json<Value> {
     Json(serde_json::json!({
         "Id": user_id(),
-        "ServerName": "spotify-mcp",
+        "ServerName": "Spotify",
         "ProductName": "Jellyfin Server",
         "Version": "10.8.13",
         "OperatingSystem": "Linux",
