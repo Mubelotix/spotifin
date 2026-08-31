@@ -197,6 +197,13 @@ pub async fn album_artists(query: ItemQuery, state: &State<AppState>) -> Json<Qu
     artist_index(query, state).await
 }
 
+#[get("/Artists/<name>")]
+pub fn artist_by_name(name: &str, state: &State<AppState>) -> MaybeItem {
+    let catalog = state.catalog.read().unwrap();
+    let artist = catalog.artists.values().find(|artist| artist.name.eq_ignore_ascii_case(name)).ok_or(Status::NotFound)?;
+    Ok(Json(base_item(&catalog, &crate::catalog::Item::Artist(artist), None)))
+}
+
 #[get("/Artists?<query..>", rank = 2)]
 pub async fn all_artists(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
     artist_index(query, state).await

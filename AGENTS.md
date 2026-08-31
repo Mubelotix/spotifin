@@ -4,13 +4,19 @@ A Jellyfin-compatible music server backed by a **real Spotify desktop client** r
 
 ## Goal
 
-Any Jellyfin music client (Finamp, Fintunes) can point at this server, browse the Spotify account like a local library (playlists, Liked Songs, saved albums, followed artists), search **all of Spotify**, and play tracks with correct lengths, seeking, favorites, playlists and lyrics.
+The supported Jellyfin music clients are:
+
+- **Finamp**: https://github.com/finamp-app/finamp
+- **Fintunes**: https://github.com/leinelissen/jellyfin-audio-player
+- **Yuzic**: https://github.com/eftpmc/yuzic
+
+They can point at this server, browse the Spotify account like a local library (playlists, Liked Songs, saved albums, followed artists), search **all of Spotify**, and play tracks with correct lengths, seeking, favorites, playlists and lyrics. Agents may freely clone these repositories when they need to inspect client behavior, request formats, or compatibility expectations.
 
 Core idea: the backend never talks to spotify.com. It drives the logged-in client from inside its own renderer (via a WebSocket to the `bridge.js` Spicetify extension) using the same internal APIs the UI uses — indistinguishable from a human clicking around.
 
 ## Resources
 
-- `TARGET.md` — behavioral spec of the Jellyfin API subset (derived from Jellyfin server, Finamp, jellyfin-audio-player sources).
+- `TARGET.md` — behavioral spec of the Jellyfin API subset (derived from Jellyfin server and the supported client sources).
 - `spicetify-dev-docs.md` — vendored spicetify development docs (Platform, CosmosAsync, GraphQL), one greppable file, sections delimited by `=== <path> ===`. Docs drift: verify against the live client before relying on anything.
 - `bridge.js` — Spicetify extension; connects to `ws://127.0.0.1:8000/ws`, reconnects every 2 s, evaluates JS sent by the backend (`POST /debug/eval`, gated by `DEBUG_EVAL`) and returns results as JSON.
 - `src/catalog.rs` — in-memory model; stable UUIDv5 item IDs derived from Spotify URIs.

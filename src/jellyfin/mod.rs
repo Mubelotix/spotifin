@@ -28,6 +28,7 @@ pub fn routes() -> Vec<Route> {
         items::user_item,
         items::item_detail,
         items::album_artists,
+        items::artist_by_name,
         items::all_artists,
         items::genres,
         items::music_genres,
