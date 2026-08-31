@@ -17,6 +17,7 @@ podman run -d --replace --name spotify \
     -e SPICETIFY_EXTENSIONS="${SPICETIFY_EXTENSIONS:-adblock.js bridge.js}" \
     -e SPICETIFY_CUSTOM_APPS="${SPICETIFY_CUSTOM_APPS:-}" \
     -e SPICETIFY_THEME="${SPICETIFY_THEME:-}" \
+    -e DEBUG_EVAL="${DEBUG_EVAL:-1}" \
     --device /dev/dri \
     --shm-size=1g \
     -v "$DATA_DIR":/config \

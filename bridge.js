@@ -17,6 +17,51 @@
         }, RETRY_MS);
     }
 
+    function serialize(value) {
+        if (value === undefined) return "undefined";
+        if (typeof value === "string") return value;
+        try {
+            return JSON.stringify(value);
+        } catch (error) {
+            return String(value);
+        }
+    }
+
+    function handleMessage(event) {
+        let message;
+        try {
+            message = JSON.parse(event.data);
+        } catch (error) {
+            log("bad message:", error);
+            return;
+        }
+        if (message.type !== "eval") {
+            log("message:", event.data);
+            return;
+        }
+
+        const respond = (response) => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                log("cannot respond, socket not open");
+                return;
+            }
+            try {
+                socket.send(JSON.stringify(response));
+            } catch (error) {
+                log("send failed:", error);
+            }
+        };
+
+        try {
+            Promise.resolve(eval(message.code)).then(
+                (value) => respond({ type: "result", id: message.id, ok: true, value: serialize(value) }),
+                (error) => respond({ type: "result", id: message.id, ok: false, error: String((error && error.message) || error) })
+            );
+        } catch (error) {
+            respond({ type: "result", id: message.id, ok: false, error: String((error && error.message) || error) });
+        }
+    }
+
     function connect() {
         if (socket && socket.readyState <= WebSocket.OPEN) return;
         try {
@@ -33,9 +78,7 @@
             socket.send(JSON.stringify({ type: "hello", agent: "spicetify-bridge" }));
         };
 
-        socket.onmessage = (event) => {
-            log("message:", event.data);
-        };
+        socket.onmessage = handleMessage;
 
         socket.onerror = () => {
             log("error");

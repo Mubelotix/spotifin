@@ -1,22 +1,46 @@
-use std::{env, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
 
 use rocket::{
+    data::{Data, ByteUnit},
     fs::NamedFile,
     get,
     http::{ContentType, Status},
+    post,
     response::{Responder, Response},
     routes, State,
 };
-use rocket_ws::{Message, Stream, WebSocket};
+use rocket::futures::{SinkExt, StreamExt};
+use rocket_ws::{Channel, Message, WebSocket};
+use serde_json::Value;
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
-    time::sleep,
+    sync::{mpsc, oneshot},
+    time::{sleep, timeout},
 };
+
+const EVAL_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Default)]
+struct BridgeState {
+    sender: Mutex<Option<mpsc::UnboundedSender<Message>>>,
+    pending: Mutex<HashMap<u64, oneshot::Sender<Value>>>,
+    next_id: AtomicU64,
+}
 
 #[derive(Clone)]
 struct AppState {
     recording: Arc<PathBuf>,
     hls: Arc<PathBuf>,
+    bridge: Arc<BridgeState>,
 }
 
 fn data_dir() -> PathBuf {
@@ -142,18 +166,123 @@ fn health() -> Status {
     Status::Ok
 }
 
+fn resolve_result(bridge: &BridgeState, text: &str) {
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    if value.get("type").and_then(Value::as_str) != Some("result") {
+        return;
+    }
+    let Some(id) = value.get("id").and_then(Value::as_u64) else {
+        return;
+    };
+    if let Some(waiter) = bridge.pending.lock().unwrap().remove(&id) {
+        let _ = waiter.send(value);
+    }
+}
+
 #[get("/ws")]
-fn ws(ws: WebSocket) -> Stream![] {
-    Stream! { ws =>
-        for await message in ws {
-            match message? {
-                Message::Text(text) => yield Message::Text(format!("ack:{text}")),
-                Message::Ping(payload) => yield Message::Pong(payload),
-                Message::Close(_) => break,
-                _ => {}
-            }
+fn ws(ws: WebSocket, state: &State<AppState>) -> Channel<'static> {
+    let bridge = state.bridge.clone();
+    ws.channel(move |stream| {
+        Box::pin(async move {
+            let (mut sink, mut source) = stream.split();
+            let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+            *bridge.sender.lock().unwrap() = Some(tx);
+
+            let outcome = loop {
+                tokio::select! {
+                    outgoing = rx.recv() => match outgoing {
+                        Some(message) => {
+                            if sink.send(message).await.is_err() {
+                                break Err(rocket_ws::result::Error::ConnectionClosed);
+                            }
+                        }
+                        None => break Ok(()),
+                    },
+                    incoming = source.next() => match incoming {
+                        Some(Ok(Message::Text(text))) => resolve_result(&bridge, &text),
+                        Some(Ok(_)) => {}
+                        Some(Err(error)) => break Err(error),
+                        None => break Ok(()),
+                    },
+                }
+            };
+
+            *bridge.sender.lock().unwrap() = None;
+            outcome
+        })
+    })
+}
+
+const NOT_CONNECTED: &str = "{\"error\":\"spicetify bridge not connected\"}";
+const FORBIDDEN: &str = "{\"error\":\"debug eval is disabled\"}";
+
+fn eval_enabled() -> bool {
+    matches!(
+        env::var("DEBUG_EVAL").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+async fn eval_on_bridge(
+    bridge: &BridgeState,
+    code: String,
+) -> Result<(ContentType, String), (Status, String)> {
+    let Some(sender) = bridge.sender.lock().unwrap().clone() else {
+        return Err((Status::ServiceUnavailable, NOT_CONNECTED.into()));
+    };
+
+    let id = bridge.next_id.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = oneshot::channel();
+    bridge.pending.lock().unwrap().insert(id, tx);
+
+    let request = serde_json::json!({ "type": "eval", "id": id, "code": code });
+    if sender.send(Message::text(request.to_string())).is_err() {
+        bridge.pending.lock().unwrap().remove(&id);
+        return Err((Status::ServiceUnavailable, NOT_CONNECTED.into()));
+    }
+
+    match timeout(EVAL_TIMEOUT, rx).await {
+        Ok(Ok(response)) if response.get("ok").and_then(Value::as_bool) == Some(true) => {
+            Ok((ContentType::JSON, response.to_string()))
+        }
+        Ok(Ok(response)) => {
+            let error = response
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error")
+                .to_string();
+            Err((Status::BadRequest, serde_json::json!({ "error": error }).to_string()))
+        }
+        Ok(Err(_)) => Err((
+            Status::BadGateway,
+            "{\"error\":\"bridge dropped the request\"}".into(),
+        )),
+        Err(_) => {
+            bridge.pending.lock().unwrap().remove(&id);
+            Err((
+                Status::GatewayTimeout,
+                "{\"error\":\"extension did not answer in time\"}".into(),
+            ))
         }
     }
+}
+
+#[post("/debug/eval", data = "<body>")]
+async fn debug_eval(
+    state: &State<AppState>,
+    body: Data<'_>,
+) -> Result<(ContentType, String), (Status, String)> {
+    if !eval_enabled() {
+        return Err((Status::Forbidden, FORBIDDEN.into()));
+    }
+    let bytes = match body.open(ByteUnit::MiB).into_bytes().await {
+        Ok(capped) => capped.value,
+        Err(_) => Vec::new(),
+    };
+    let code = String::from_utf8_lossy(&bytes).into_owned();
+    eval_on_bridge(&state.bridge, code).await
 }
 
 #[rocket::launch]
@@ -162,6 +291,7 @@ async fn rocket() -> _ {
     let state = AppState {
         recording: Arc::new(root.join("recording.aac")),
         hls: Arc::new(root.join("hls")),
+        bridge: Arc::new(BridgeState::default()),
     };
 
     if let Err(error) = ensure_dirs(&state).await {
@@ -177,7 +307,8 @@ async fn rocket() -> _ {
             segment,
             relative_segment,
             health,
-            ws
+            ws,
+            debug_eval
         ],
     )
 }

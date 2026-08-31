@@ -61,6 +61,7 @@ Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/sp
 - Lyrics are available through Spotify's interface using the microphone button.
 - Audio is known to stream through the Selkies interface when Spotify is playing inside the container. The audio recording/streaming location is undecided: it may be in the Spicetify extension, in the Rust backend, or outside the container, and may use the Selkies API itself.
 - A Rust backend is acceptable and will open the HTTP port, answer HTTP requests, and communicate with the Spicetify extension through a WebSocket. The extension is `bridge.js`; it connects to `ws://127.0.0.1:8000/ws` (Rocket `rocket_ws` route) and reconnects every 2s until the link comes back.
+- `POST /debug/eval` sends its body as JavaScript to the bridge for evaluation in the Spotify renderer and returns the result as JSON (`{type:"result",id,ok,value|error}`). Gated by `DEBUG_EVAL` (default off → 403; `run-spotify.sh` sets it). 503 when no bridge is connected, 400 if evaluation threw, 504 after 10s without an answer.
 
 ## Hard-won container lessons
 
