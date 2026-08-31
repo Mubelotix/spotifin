@@ -315,10 +315,11 @@ impl Catalog {
         artist_ids: &[Uuid],
         album_artist_ids: &[Uuid],
         contributing_artist_ids: &[Uuid],
+        album_ids: &[Uuid],
     ) -> Vec<Item<'_>> {
         let mut items = self.candidate_items(parent);
         items.retain(|item| {
-            self.matches(item, types, parent, search, favorites_only, artist_ids, album_artist_ids, contributing_artist_ids)
+            self.matches(item, types, parent, search, favorites_only, artist_ids, album_artist_ids, contributing_artist_ids, album_ids)
         });
         if !matches!(parent, Some(id) if self.playlists.contains_key(&id)) {
             items.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
@@ -390,6 +391,7 @@ impl Catalog {
         artist_ids: &[Uuid],
         album_artist_ids: &[Uuid],
         contributing_artist_ids: &[Uuid],
+        album_ids: &[Uuid],
     ) -> bool {
         if matches!(item, Item::Library(_)) && parent.is_some() {
             return false;
@@ -427,6 +429,9 @@ impl Catalog {
             return false;
         }
         if !contributing_artist_ids.is_empty() && !self.has_contributing_artist(item, contributing_artist_ids) {
+            return false;
+        }
+        if !album_ids.is_empty() && !matches!(item, Item::Track(track) if track.album_id.is_some_and(|id| album_ids.contains(&id))) {
             return false;
         }
         match search {
