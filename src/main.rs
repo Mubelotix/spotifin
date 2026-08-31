@@ -46,11 +46,15 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const SUSPECT_SHRINK_FACTOR: usize = 4;
 const SUSPECT_MAX_TRIES: u32 = 5;
 
-async fn refresh_loop(bridge: bridge::BridgeState, catalog: std::sync::Arc<std::sync::RwLock<catalog::Catalog>>) {
-    let mut known_tracks = 0usize;
+async fn refresh_loop(
+    bridge: bridge::BridgeState,
+    catalog: std::sync::Arc<std::sync::RwLock<catalog::Catalog>>,
+    cache: Arc<PathBuf>,
+) {
+    let mut known_tracks = catalog.read().unwrap().tracks.len();
     let mut suspect_streak = 0u32;
     loop {
-        match spotify::collect(&bridge).await {
+        match spotify::collect(&bridge, &cache).await {
             Ok(fresh) => {
                 let size = fresh.tracks.len();
                 let suspect =
@@ -90,13 +94,14 @@ async fn rocket() -> _ {
     let hls = root.join("hls");
     let cache = root.join("cache");
     let recording = root.join("recording.aac");
+    let cached_catalog = spotify::load_playlist_cache(&cache).await;
     let state = AppState {
         audio: AudioPaths {
             recording: Arc::new(recording),
             hls: Arc::new(hls.clone()),
             cache: Arc::new(cache.clone()),
         },
-        catalog: Arc::default(),
+        catalog: Arc::new(std::sync::RwLock::new(cached_catalog)),
         bridge: bridge::BridgeState::default(),
         player: player::PlayerControl::default(),
     };
@@ -108,7 +113,7 @@ async fn rocket() -> _ {
         eprintln!("could not create cache directory: {error}");
     }
 
-    tokio::spawn(refresh_loop(state.bridge.clone(), state.catalog.clone()));
+    tokio::spawn(refresh_loop(state.bridge.clone(), state.catalog.clone(), state.audio.cache.clone()));
     let idle_timeout = Duration::from_secs(
         std::env::var("PLAYBACK_IDLE_TIMEOUT_SECS")
             .ok()

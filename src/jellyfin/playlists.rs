@@ -63,13 +63,18 @@ pub async fn create_playlist(body: Json<Value>, state: &State<AppState>) -> Resu
     let id = catalog::stable_id(&uri);
     {
         let mut catalog = state.catalog.write().unwrap();
-        catalog.playlists.entry(id).or_insert(Playlist {
+        let playlist = Playlist {
             id,
-            name,
+            name: name.clone(),
             image: None,
-            spotify_uri: Some(uri),
+            spotify_uri: Some(uri.clone()),
             entries: Vec::new(),
-        });
+        };
+        catalog.playlists.entry(id).or_insert(playlist);
+    }
+    let raw = serde_json::json!({ "uri": uri, "name": name, "image": null, "tracks": [] });
+    if let Err(error) = spotify::cache_playlist(&state.audio.cache, &raw).await {
+        eprintln!("could not cache playlist: {error}");
     }
     Ok(Json(serde_json::json!({ "Id": id })))
 }
@@ -82,7 +87,12 @@ async fn resync(state: &State<AppState>, playlist_id: Uuid) {
     let uri = state.catalog.read().unwrap().playlists.get(&playlist_id).and_then(|p| p.spotify_uri.clone());
     let Some(uri) = uri else { return };
     match spotify::fetch_playlist(&state.bridge, &uri).await {
-        Ok(raw) => spotify::absorb_playlist(&mut state.catalog.write().unwrap(), &raw),
+        Ok(raw) => {
+            if let Err(error) = spotify::cache_playlist(&state.audio.cache, &raw).await {
+                eprintln!("could not cache playlist: {error}");
+            }
+            spotify::absorb_playlist(&mut state.catalog.write().unwrap(), &raw);
+        }
         Err(error) => eprintln!("resync failed for {uri}: {error}"),
     }
 }

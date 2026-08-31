@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::path::Path;
 use uuid::Uuid;
 
 use crate::bridge::{eval_on_bridge, BridgeState};
@@ -114,7 +115,7 @@ const COLLECT_JS: &str = r#"
 })()
 "#;
 
-pub async fn collect(bridge: &crate::bridge::BridgeState) -> Result<Catalog, String> {
+pub async fn collect(bridge: &crate::bridge::BridgeState, cache_dir: &Path) -> Result<Catalog, String> {
     let response = eval_on_bridge(bridge, COLLECT_JS.to_string())
         .await
         .map_err(|error| format!("collect failed: {error}"))?;
@@ -129,7 +130,59 @@ pub async fn collect(bridge: &crate::bridge::BridgeState) -> Result<Catalog, Str
             eprintln!("catalog collector: {error}");
         }
     }
-    parse_catalog(&playlists)
+    let catalog = parse_catalog(&playlists)?;
+    if let Some(items) = playlists.get("playlists").and_then(Value::as_array) {
+        for playlist in items {
+            if let Err(error) = cache_playlist(cache_dir, playlist).await {
+                eprintln!("could not cache playlist: {error}");
+            }
+        }
+    }
+    Ok(catalog)
+}
+
+/// Restores playlists from the previous session while the Spotify renderer is
+/// still starting. Invalid or incomplete cache files are ignored individually.
+pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
+    let mut catalog = Catalog::new();
+    let Ok(mut files) = tokio::fs::read_dir(cache_dir).await else {
+        return catalog;
+    };
+    while let Ok(Some(entry)) = files.next_entry().await {
+        let path = entry.path();
+        if !path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("playlist-") && name.ends_with(".json"))
+        {
+            continue;
+        }
+        let Ok(raw) = tokio::fs::read_to_string(&path).await else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        if value.get("uri").and_then(Value::as_str).is_some() {
+            add_playlist(&mut catalog, &value);
+        }
+    }
+    catalog
+}
+
+/// Persists the renderer's raw playlist shape so it can be restored without
+/// waiting for the client to become available.
+pub async fn cache_playlist(cache_dir: &Path, raw: &Value) -> Result<(), String> {
+    let uri = raw
+        .get("uri")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "playlist has no URI".to_string())?;
+    let id = catalog::stable_id(uri);
+    let json = serde_json::to_vec_pretty(raw).map_err(|error| error.to_string())?;
+    let path = cache_dir.join(format!("playlist-{id}.json"));
+    let temporary = cache_dir.join(format!("playlist-{id}.json.tmp"));
+    tokio::fs::write(&temporary, json).await.map_err(|error| error.to_string())?;
+    tokio::fs::rename(&temporary, &path).await.map_err(|error| error.to_string())
 }
 
 const SEARCH_JS: &str = r#"
@@ -488,4 +541,46 @@ pub async fn fetch_playlist(bridge: &BridgeState, spotify_uri: &str) -> Result<V
 
 pub fn absorb_playlist(catalog: &mut Catalog, raw: &Value) {
     add_playlist(catalog, raw);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn playlist_cache_round_trip() {
+        let cache_dir = std::env::temp_dir().join(format!(
+            "spotify-server-playlist-cache-{}",
+            std::process::id()
+        ));
+        let _ = tokio::fs::remove_dir_all(&cache_dir).await;
+        tokio::fs::create_dir_all(&cache_dir).await.unwrap();
+        let raw = serde_json::json!({
+            "uri": "spotify:playlist:test-cache",
+            "name": "Cached playlist",
+            "image": null,
+            "tracks": [{
+                "uid": "row-1",
+                "uri": "spotify:track:test-track",
+                "name": "Cached track",
+                "album": null,
+                "artists": [],
+                "ms": 1000,
+                "disc": 1,
+                "num": 1
+            }]
+        });
+
+        cache_playlist(&cache_dir, &raw).await.unwrap();
+        let restored = load_playlist_cache(&cache_dir).await;
+        let playlist_id = catalog::stable_id("spotify:playlist:test-cache");
+        let track_id = catalog::stable_id("spotify:track:test-track");
+        let playlist = restored.playlists.get(&playlist_id).unwrap();
+        assert_eq!(playlist.name, "Cached playlist");
+        assert_eq!(playlist.entries.len(), 1);
+        assert_eq!(playlist.entries[0].track_id, track_id);
+        assert_eq!(restored.tracks.get(&track_id).unwrap().name, "Cached track");
+
+        tokio::fs::remove_dir_all(&cache_dir).await.unwrap();
+    }
 }
