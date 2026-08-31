@@ -6,7 +6,7 @@ use rocket::fs::NamedFile;
 use rocket::http::{ContentType, Status};
 use rocket::request::{Outcome, Request};
 use rocket::response::{Responder, Response};
-use rocket::{get, routes, Route, State};
+use rocket::{get, head, routes, Route, State};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     time::sleep,
@@ -20,6 +20,7 @@ pub fn routes() -> Vec<Route> {
             file_alias,
             item_file_alias,
             download,
+            universal_head,
             stream_alias,
             stream_mp3,
             stream_aac,
@@ -33,6 +34,25 @@ pub fn routes() -> Vec<Route> {
             segment,
             relative_segment
         ]
+}
+
+/// Reports the direct-play stream metadata without starting Spotify playback.
+/// Fintunes uses this probe before issuing the real GET request.
+#[head("/Audio/<item_id>/universal")]
+pub fn universal_head(
+    state: &State<crate::AppState>,
+    item_id: &str,
+) -> Result<(ContentType, &'static str), Status> {
+    let id = uuid::Uuid::parse_str(item_id).map_err(|_| Status::NotFound)?;
+    let _duration_ms = state
+        .catalog
+        .read()
+        .unwrap()
+        .tracks
+        .get(&id)
+        .map(|track| track.duration_ms)
+        .ok_or(Status::NotFound)?;
+    Ok((ContentType::AAC, ""))
 }
 
 pub struct AudioResponse(Response<'static>);
@@ -282,7 +302,9 @@ async fn open_audio_stream(
 /// All audio items stream the shared live recording; requesting a known item
 /// switches the client to that track first.
 #[get("/Audio/<item_id>/universal")]
-pub async fn universal(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+pub async fn universal(
+    state: &State<crate::AppState>, item_id: &str, range: RangeHeader,
+) -> Result<AudioResponse, rocket::http::Status> {
     open_audio_stream(state, item_id, range).await
 }
 
