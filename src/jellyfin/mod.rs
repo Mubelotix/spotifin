@@ -24,6 +24,7 @@ pub fn routes() -> Vec<Route> {
         auth::logout,
         items::views,
         items::user_views,
+        items::media_folders,
         items::user_items,
         items::items,
         items::user_item,

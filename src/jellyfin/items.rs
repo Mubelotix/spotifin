@@ -39,6 +39,7 @@ fn parse_types(raw: Option<String>) -> Vec<&'static str> {
         ("MusicGenre", "MusicGenre"),
         ("Playlist", "Playlist"),
         ("CollectionFolder", "CollectionFolder"),
+        ("Folder", "CollectionFolder"),
     ];
     raw.map(|list| {
         list.split(',')
@@ -169,6 +170,11 @@ pub fn views(user_id: Uuid, state: &State<AppState>) -> Json<QueryResult<BaseIte
 
 #[get("/UserViews")]
 pub fn user_views(state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+    view_result(state)
+}
+
+#[get("/Library/MediaFolders")]
+pub fn media_folders(state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
     view_result(state)
 }
 
