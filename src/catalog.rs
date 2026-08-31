@@ -23,6 +23,7 @@ pub struct Artist {
 #[derive(Clone)]
 pub struct Album {
     pub id: Uuid,
+    pub uri: String,
     pub name: String,
     pub artist_ids: Vec<Uuid>,
     pub image: Option<String>,
@@ -216,11 +217,17 @@ impl Catalog {
     }
 
     pub fn is_favorite(&self, id: Uuid) -> bool {
-        self.favorites.contains(&id) || self.followed_artists.contains(&id)
+        self.favorites.contains(&id) || self.saved_albums.contains(&id) || self.followed_artists.contains(&id)
     }
 
     pub fn set_favorite(&mut self, id: Uuid, favorite: bool) {
-        if self.artists.contains_key(&id) {
+        if self.albums.contains_key(&id) {
+            if favorite {
+                self.saved_albums.insert(id);
+            } else {
+                self.saved_albums.remove(&id);
+            }
+        } else if self.artists.contains_key(&id) {
             if favorite {
                 self.followed_artists.insert(id);
             } else {

@@ -74,6 +74,7 @@ async fn set_favorite(user_id: Uuid, item_id: Uuid, favorite: bool, state: &Stat
         let catalog = state.catalog.read().unwrap();
         match catalog.item(item_id) {
             Some(crate::catalog::Item::Track(track)) => track.uri.clone(),
+            Some(crate::catalog::Item::Album(album)) => album.uri.clone(),
             Some(crate::catalog::Item::Artist(artist)) => artist.uri.clone(),
             Some(_) => return Err(Status::BadRequest),
             None => return Err(Status::NotFound),
@@ -90,6 +91,7 @@ async fn set_spotify_favorite(state: &State<AppState>, item_id: Uuid, favorite: 
         let catalog = state.catalog.read().unwrap();
         match catalog.item(item_id) {
             Some(crate::catalog::Item::Track(track)) => track.uri.clone(),
+            Some(crate::catalog::Item::Album(album)) => album.uri.clone(),
             Some(crate::catalog::Item::Artist(artist)) => artist.uri.clone(),
             _ => return Err("item is not a track".into()),
         }

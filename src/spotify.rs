@@ -565,6 +565,7 @@ fn add_saved_album(catalog: &mut Catalog, raw: &Value) {
         None => {
             catalog.albums.insert(id, Album {
                 id,
+                uri: uri.to_string(),
                 name,
                 artist_ids,
                 image: image_of(raw.get("image")),
@@ -645,6 +646,7 @@ fn add_album(catalog: &mut Catalog, raw: &Value, artist_ids: &[Uuid]) -> Option<
         let name = if name.is_empty() { "Local files".to_string() } else { name };
         Album {
             id,
+            uri: uri.to_string(),
             name,
             artist_ids: artist_ids.to_vec(),
             image: image_of(raw.get("image")),
