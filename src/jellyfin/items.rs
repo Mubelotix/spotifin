@@ -219,13 +219,67 @@ pub fn item_detail(item_id: Uuid, state: &State<AppState>) -> MaybeItem {
     }
 }
 
-#[get("/Items/<item_id>/InstantMix")]
-pub fn instant_mix(item_id: Uuid, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {    let catalog = state.catalog.read().unwrap();
+#[get("/Items/<item_id>/InstantMix?<query..>")]
+pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+    let limit = query.limit.unwrap_or(50);
+    let seed_uri = {
+        let catalog = state.catalog.read().unwrap();
+        match catalog.item(item_id) {
+            Some(crate::catalog::Item::Track(track)) => Some(track.uri.clone()),
+            _ => None,
+        }
+    };
+    // A track mix is requested before the client starts its queue. Seed
+    // Spotify first so nextItems belongs to the requested track, not to a
+    // previous playback context.
+    let seeded = seed_uri.is_some();
+    let autoplay = crate::spotify::autoplay_tracks(&state.bridge, seed_uri.as_deref())
+        .await
+        .unwrap_or_default();
+
+    if !autoplay.is_empty() {
+        let mut catalog = state.catalog.write().unwrap();
+        for track in autoplay.iter().take(limit) {
+            crate::spotify::ingest_track(&mut catalog, track);
+        }
+    }
+
+    let catalog = state.catalog.read().unwrap();
     let seed = catalog.item(item_id).map(|item| item.name().to_string());
-    let mut tracks = catalog.random_tracks(25);
-    // Mixes seeded by the source item keep a stable flavor per item.
-    if let Some(seed) = seed {
-        tracks.sort_by_key(|track| format!("{}:{}", seed, track.id()));
+    let mut tracks = if autoplay.is_empty() {
+        if seeded {
+            seed_uri
+                .as_deref()
+                .map(crate::catalog::stable_id)
+                .and_then(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
+                .into_iter()
+                .collect()
+        } else {
+            catalog.random_tracks(limit)
+        }
+    } else {
+        let mut ids = autoplay
+            .iter()
+            .take(limit)
+            .filter_map(|raw| raw.get("uri").and_then(Value::as_str))
+            .map(crate::catalog::stable_id)
+            .collect::<Vec<_>>();
+        if seeded {
+            if let Some(seed_uri) = seed_uri.as_deref() {
+                ids.insert(0, crate::catalog::stable_id(seed_uri));
+                ids.truncate(limit);
+            }
+        }
+        ids.into_iter()
+            .filter_map(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
+            .collect()
+    };
+    // The fallback keeps the old deterministic seed behavior. Spotify's
+    // autoplay list is already ordered by its recommendation engine.
+    if autoplay.is_empty() {
+        if let Some(seed) = seed {
+            tracks.sort_by_key(|track| format!("{}:{}", seed, track.id()));
+        }
     }
     let dtos = tracks.iter().map(|track| base_item(&catalog, track, None)).collect();
     Json(QueryResult { items: dtos, total_record_count: tracks.len(), start_index: 0 })
