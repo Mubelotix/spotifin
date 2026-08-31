@@ -82,6 +82,9 @@ Spicetify plugins are env vars on `run-spotify.sh`: `SPICETIFY_EXTENSIONS` (defa
 
 ## Container lessons
 
+- The image ships runtime dependencies only — never the proprietary Spotify client. On first boot the cont-init script downloads `spotify-client` from repository.spotify.com (targeted `apt-get update` on just the Spotify list), extracts it to `/config/spotify-client` (persisted; delete to re-download), and symlinks it to `/usr/share/spotify` and `/usr/local/bin/spotify` so spicetify and autostart keep working unchanged. Boot degrades gracefully (backend still runs) if the download fails; it retries next boot.
+- `apt-get download` drops privileges to `_apt`, so its target dir must be writable by `_apt` — run it with `-o APT::Sandbox::User=root` when scripting it.
+- Lines generated through `RUN printf '%s\n'` are literal script lines: a line may not start with `&&` (shell syntax error, kills the whole init under `set -e`). Keep `if` conditions on one line.
 - Custom init scripts go to `/custom-cont-init.d/*.sh`, app autostart to `/defaults/autostart`.
 - Root-owned leftovers under `/config` or `/defaults` break everything (black screen, PulseAudio failure). The init script chowns both to `abc` at boot, with a detached loop that keeps re-fixing `/defaults`.
 - Stale `/config/.cache/spotify/Singleton*` and `pending/` locks crash Spotify silently at startup — cleaned every boot. Spotify also needs `dbus-launch` or it busy-spins at 100 % CPU.

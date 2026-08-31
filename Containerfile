@@ -1,5 +1,9 @@
 FROM ghcr.io/linuxserver/baseimage-selkies:debiantrixie
 
+# Runtime dependencies only. The proprietary Spotify client is NOT shipped in
+# the image: it is downloaded from repository.spotify.com by the init script
+# on first boot and persisted under /config/spotify-client (symlinked into
+# /usr/share/spotify and /usr/local/bin/spotify).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates \
     && mkdir -p /etc/apt/keyrings \
@@ -9,7 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/apt/sources.list.d/spotify.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        spotify-client \
         libasound2t64 \
         libayatana-appindicator3-1 \
         libgl1 \
@@ -57,6 +60,21 @@ RUN mkdir -p /custom-cont-init.d \
         'SPICETIFY_HOME=/config' \
         'SPICETIFY_CONFIG=/config/spicetify' \
         'CFG="$SPICETIFY_CONFIG/config-xpui.ini"' \
+        'CLIENT_DIR=/config/spotify-client' \
+        'if [ ! -x "$CLIENT_DIR/usr/share/spotify/spotify" ]; then' \
+        '    echo "[cont-init] Spotify client missing, downloading from repository.spotify.com (first boot, ~130 MB, persisted in /config)"' \
+        '    if apt-get update -qq -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/spotify.list -o Dir::Etc::sourceparts=/dev/null && (cd /tmp && apt-get download -o APT::Sandbox::User=root spotify-client) && rm -rf /config/.spotify-client.tmp && dpkg-deb -x /tmp/spotify-client_*.deb /config/.spotify-client.tmp; then' \
+        '        rm -rf "$CLIENT_DIR" && mv /config/.spotify-client.tmp "$CLIENT_DIR"' \
+        '        chown -R abc:abc "$CLIENT_DIR"' \
+        '        echo "[cont-init] Spotify client installed to $CLIENT_DIR"' \
+        '    else' \
+        '        rm -rf /config/.spotify-client.tmp' \
+        '        echo "[cont-init] WARNING: Spotify client download failed, will retry on next boot"' \
+        '    fi' \
+        '    rm -f /tmp/spotify-client_*.deb' \
+        'fi' \
+        'ln -sfn "$CLIENT_DIR/usr/share/spotify" /usr/share/spotify' \
+        'ln -sfn "$CLIENT_DIR/usr/bin/spotify" /usr/local/bin/spotify' \
         'setsid nohup sh -c "while true; do u=\$(stat -c %u /defaults 2>/dev/null); echo \"\$(date +%T) \$u\" >> /config/owner-boot.log; if [ \"\$u\" != \"\$(id -u abc)\" ]; then echo \"\$(date +%T) FIXING\" >> /config/owner-boot.log; lsiown -R abc:abc /defaults >> /config/owner-boot.log 2>&1 || true; fi; sleep 1; done" >/dev/null 2>&1 &' \
         'chown -R abc:abc /config/.cache /config/.config "$SPICETIFY_CONFIG" 2>/dev/null || true' \
         'rm -rf /config/.cache/spotify/pending' \
@@ -69,7 +87,7 @@ RUN mkdir -p /custom-cont-init.d \
         'setsid nohup su abc -s /bin/bash -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -flush_packets 1 -f adts /config/audio/recording.aac; sleep 2; done" >/dev/null 2>&1 &' \
         'setsid nohup su abc -s /bin/bash -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f hls -hls_time 6 -hls_list_size 0 -hls_playlist_type event -hls_segment_filename /config/audio/hls/segment-%06d.ts /config/audio/hls/main.m3u8; sleep 2; done" >/dev/null 2>&1 &' \
         '[ -f /config/.config/spotify/prefs ] || touch /config/.config/spotify/prefs' \
-        'chmod -R a+rwX /usr/share/spotify' \
+        'chmod -R a+rwX /usr/share/spotify 2>/dev/null || true' \
         'if [ ! -f "$CFG" ]; then' \
         '    su abc -s /bin/bash -c "HOME=$SPICETIFY_HOME SPICETIFY_CONFIG=$SPICETIFY_CONFIG spicetify backup apply" || true' \
         'fi' \
