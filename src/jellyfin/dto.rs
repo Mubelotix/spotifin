@@ -245,7 +245,7 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
     dto.has_lyrics = Some(match std::fs::read(lyrics_cache_path(track.id)) {
         Ok(raw) => serde_json::from_slice::<serde_json::Value>(&raw)
             .ok()
-            .and_then(|json| json.get("Lyrics")?.as_array().map(|lyrics| !lyrics.is_empty()))
+            .and_then(|json| json.get("Lyrics")?.as_array().map(|_| true))
             .unwrap_or(true),
         Err(_) => true,
     });
