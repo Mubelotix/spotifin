@@ -249,8 +249,9 @@ pub async fn remove_from_playlist(
             .entries
             .iter()
             .filter(|entry| {
-                let id = entry.id.to_string();
-                entry_ids.entry_ids.contains(&id)
+                let entry_id = entry.id.to_string();
+                let track_id = entry.track_id.to_string();
+                entry_ids.entry_ids.contains(&entry_id) || entry_ids.entry_ids.contains(&track_id)
             })
             .filter_map(|entry| entry.uid.clone())
             .collect();
@@ -265,8 +266,9 @@ pub async fn remove_from_playlist(
         let mut catalog = state.catalog.write().unwrap();
         if let Some(playlist) = catalog.playlists.get_mut(&playlist_id) {
             playlist.entries.retain(|entry| {
-                let id = entry.id.to_string();
-                !entry_ids.entry_ids.contains(&id)
+                let entry_id = entry.id.to_string();
+                let track_id = entry.track_id.to_string();
+                !entry_ids.entry_ids.contains(&entry_id) && !entry_ids.entry_ids.contains(&track_id)
             });
         }
         return Ok(Status::NoContent);
