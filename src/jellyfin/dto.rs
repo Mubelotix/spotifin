@@ -74,7 +74,23 @@ pub struct BaseItemDto {
 #[serde(rename_all = "PascalCase")]
 pub struct MediaSourceDto {
     pub id: Uuid,
+    pub protocol: &'static str,
+    #[serde(rename = "Type")]
+    pub source_type: &'static str,
     pub container: &'static str,
+    pub is_remote: bool,
+    pub supports_transcoding: bool,
+    pub supports_direct_stream: bool,
+    pub supports_direct_play: bool,
+    pub is_infinite_stream: bool,
+    pub requires_opening: bool,
+    pub requires_closing: bool,
+    pub requires_looping: bool,
+    pub supports_probing: bool,
+    pub read_at_native_framerate: bool,
+    pub ignore_dts: bool,
+    pub ignore_index: bool,
+    pub gen_pts_input: bool,
     pub media_streams: Vec<MediaStreamDto>,
 }
 
@@ -88,6 +104,12 @@ pub struct MediaStreamDto {
     pub bit_rate: u32,
     pub sample_rate: u32,
     pub channels: u8,
+    pub is_interlaced: bool,
+    pub is_default: bool,
+    pub is_forced: bool,
+    pub is_external: bool,
+    pub is_text_subtitle_stream: bool,
+    pub supports_external_stream: bool,
 }
 
 pub fn lyrics_cache_path(id: Uuid) -> PathBuf {
@@ -232,7 +254,22 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
     dto.container = Some("mp3");
     dto.media_sources = Some(vec![MediaSourceDto {
         id: track.id,
+        protocol: "Http",
+        source_type: "Default",
         container: "aac",
+        is_remote: false,
+        supports_transcoding: true,
+        supports_direct_stream: true,
+        supports_direct_play: true,
+        is_infinite_stream: false,
+        requires_opening: false,
+        requires_closing: false,
+        requires_looping: false,
+        supports_probing: false,
+        read_at_native_framerate: false,
+        ignore_dts: false,
+        ignore_index: false,
+        gen_pts_input: false,
         media_streams: vec![MediaStreamDto {
             index: 0,
             stream_type: "Audio",
@@ -240,6 +277,12 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
             bit_rate: 192_000,
             sample_rate: 44_100,
             channels: 2,
+            is_interlaced: false,
+            is_default: true,
+            is_forced: false,
+            is_external: false,
+            is_text_subtitle_stream: false,
+            supports_external_stream: false,
         }],
     }]);
     dto.has_lyrics = Some(match std::fs::read(lyrics_cache_path(track.id)) {
