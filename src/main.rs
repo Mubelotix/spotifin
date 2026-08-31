@@ -127,6 +127,7 @@ async fn rocket() -> _ {
     // Clients append /api to the server URL; serve under both prefixes.
     rocket::build()
         .manage(state)
+        .attach(jellyfin::CaseInsensitiveQuery)
         .mount("/", routes![health, bridge::ws, bridge::debug_eval])
         .mount("/api", audio_and_jellyfin())
         .mount("/", audio_and_jellyfin())

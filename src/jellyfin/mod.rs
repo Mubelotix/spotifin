@@ -8,7 +8,59 @@ pub mod playback;
 pub mod playlists;
 pub mod user_data;
 
+use rocket::fairing::{Fairing, Info, Kind};
+use rocket::http::uri::Origin;
+use rocket::{Data, Request};
 use rocket::Route;
+
+/// Jellyfin's ASP.NET query binding is case-insensitive. Normalize incoming
+/// query keys before Rocket's `FromForm` parser, which is case-sensitive.
+pub struct CaseInsensitiveQuery;
+
+fn lowercase_query(uri: &str) -> Option<String> {
+    let (path, query) = uri.split_once('?')?;
+    let normalized = query
+        .split('&')
+        .map(|part| {
+            part.split_once('=').map_or_else(
+                || part.to_ascii_lowercase(),
+                |(key, value)| format!("{}={value}", key.to_ascii_lowercase()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    Some(format!("{path}?{normalized}"))
+}
+
+#[rocket::async_trait]
+impl Fairing for CaseInsensitiveQuery {
+    fn info(&self) -> Info {
+        Info {
+            name: "Case-insensitive Jellyfin query parameters",
+            kind: Kind::Request,
+        }
+    }
+
+    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
+        let Some(uri) = lowercase_query(&request.uri().to_string()) else { return };
+        if let Ok(uri) = Origin::parse_owned(uri) {
+            request.set_uri(uri);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lowercase_query;
+
+    #[test]
+    fn lowercases_query_keys_without_touching_values() {
+        assert_eq!(
+            lowercase_query("/Items?IncludeItemTypes=Audio&SearchTerm=The%20Mix&api_key=spotify"),
+            Some("/Items?includeitemtypes=Audio&searchterm=The%20Mix&api_key=spotify".to_string())
+        );
+    }
+}
 
 /// All Jellyfin-compatible routes; mounted at `/` since clients append
 /// `/api` to the server URL and Rocket strips nothing.

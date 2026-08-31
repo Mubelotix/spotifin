@@ -67,6 +67,7 @@ pub struct BaseItemDto {
     pub image_tags: Option<ImageTags>,
     pub user_data: Option<UserItemData>,
     pub playlist_item_id: Option<Uuid>,
+    pub parent_id: Option<Uuid>,
     pub media_sources: Option<Vec<MediaSourceDto>>,
 }
 
@@ -210,6 +211,7 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         image_tags: None,
         user_data: Some(user_data(catalog, item.id())),
         playlist_item_id,
+        parent_id: None,
         media_sources: None,
     };
     match item {

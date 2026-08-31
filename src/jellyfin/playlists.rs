@@ -3,6 +3,7 @@ use rocket::serde::json::Json;
 use rocket::FromForm;
 use rocket::{delete, get, post, State};
 use serde_json::Value;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::catalog::{self, Playlist};
@@ -72,16 +73,20 @@ pub async fn playlist_items(
         .zip(&playlist.entries)
         .skip(start)
         .take(query.limit.unwrap_or(usize::MAX))
-        .map(|(track, entry)| base_item(&catalog, &track, Some(entry.id)))
+        .map(|(track, entry)| {
+            let mut item = base_item(&catalog, &track, Some(entry.id));
+            item.parent_id = Some(playlist_id);
+            item
+        })
         .collect();
     Json(QueryResult { items, total_record_count: total, start_index: start })
 }
 
 #[derive(FromForm)]
 pub struct PageQuery {
-    #[field(name = "StartIndex")]
+    #[field(name = "startindex")]
     start_index: Option<usize>,
-    #[field(name = "Limit")]
+    #[field(name = "limit")]
     limit: Option<usize>,
 }
 
@@ -90,6 +95,12 @@ pub struct PageQuery {
 #[post("/Playlists", format = "json", data = "<body>")]
 pub async fn create_playlist(body: Json<Value>, state: &State<AppState>) -> Result<Json<Value>, Status> {
     let name = body.0.get("Name").and_then(Value::as_str).unwrap_or("New playlist").to_string();
+    let initial_ids = body
+        .0
+        .get("Ids")
+        .and_then(Value::as_array)
+        .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>())
+        .unwrap_or_default();
     let uri = spotify::create_playlist(&state.bridge, &name).await.map_err(|_| Status::BadGateway)?;
     let id = catalog::stable_id(&uri);
     {
@@ -108,6 +119,17 @@ pub async fn create_playlist(body: Json<Value>, state: &State<AppState>) -> Resu
     let raw = serde_json::json!({ "uri": uri, "name": name, "image": null, "tracks": [] });
     if let Err(error) = spotify::cache_playlist(&state.audio.cache, &raw).await {
         eprintln!("could not cache playlist: {error}");
+    }
+    if !initial_ids.is_empty() {
+        let track_uris = {
+            let catalog = state.catalog.read().unwrap();
+            let track_ids: Vec<Uuid> = initial_ids.iter().filter_map(|id| Uuid::parse_str(id).ok()).collect();
+            track_uris_of(&catalog, &track_ids)
+        };
+        if !track_uris.is_empty() {
+            spotify::add_tracks(&state.bridge, &uri, &track_uris).await.map_err(|_| Status::BadGateway)?;
+            resync(state, id).await;
+        }
     }
     Ok(Json(serde_json::json!({ "Id": id })))
 }
@@ -135,8 +157,22 @@ pub async fn add_to_playlist(playlist_id: Uuid, ids: AddQuery, state: &State<App
     let (spotify_uri, uris) = {
         let catalog = state.catalog.read().unwrap();
         let playlist = catalog.playlists.get(&playlist_id).ok_or(Status::NotFound)?;
-        let track_ids: Vec<Uuid> = ids.ids.iter().filter_map(|raw| Uuid::parse_str(raw).ok()).collect();
-        let uris = track_uris_of(&catalog, &track_ids);
+        let track_ids: Vec<Uuid> = ids
+            .ids
+            .iter()
+            .filter_map(|raw| Uuid::parse_str(raw).ok())
+            .collect();
+        let existing: HashSet<&str> = playlist
+            .entries
+            .iter()
+            .filter_map(|entry| catalog.tracks.get(&entry.track_id))
+            .map(|track| track.uri.as_str())
+            .collect();
+        let mut added = HashSet::new();
+        let uris = track_uris_of(&catalog, &track_ids)
+            .into_iter()
+            .filter(|uri| !existing.contains(uri.as_str()) && added.insert(uri.clone()))
+            .collect::<Vec<_>>();
         (playlist.spotify_uri.clone(), uris)
     };
     if !uris.is_empty() {
@@ -151,7 +187,7 @@ pub async fn add_to_playlist(playlist_id: Uuid, ids: AddQuery, state: &State<App
 
 #[derive(FromForm)]
 pub struct AddQuery {
-    #[field(name = "Ids")]
+    #[field(name = "ids")]
     ids: Vec<String>,
 }
 
@@ -167,7 +203,10 @@ pub async fn remove_from_playlist(
         let uids: Vec<String> = playlist
             .entries
             .iter()
-            .filter(|entry| entry_ids.entry_ids.contains(&entry.id.to_string()))
+            .filter(|entry| {
+                let id = entry.id.to_string();
+                entry_ids.entry_ids.contains(&id)
+            })
             .filter_map(|entry| entry.uid.clone())
             .collect();
         (playlist.spotify_uri.clone(), uids)
@@ -180,7 +219,10 @@ pub async fn remove_from_playlist(
     } else if spotify_uri.is_none() {
         let mut catalog = state.catalog.write().unwrap();
         if let Some(playlist) = catalog.playlists.get_mut(&playlist_id) {
-            playlist.entries.retain(|entry| !entry_ids.entry_ids.contains(&entry.id.to_string()));
+            playlist.entries.retain(|entry| {
+                let id = entry.id.to_string();
+                !entry_ids.entry_ids.contains(&id)
+            });
         }
         return Ok(Status::NoContent);
     }
@@ -190,7 +232,7 @@ pub async fn remove_from_playlist(
 
 #[derive(FromForm)]
 pub struct RemoveQuery {
-    #[field(name = "EntryIds")]
+    #[field(name = "entryids")]
     entry_ids: Vec<String>,
 }
 

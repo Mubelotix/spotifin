@@ -43,12 +43,10 @@ fn default_persistent_identifier() -> bool {
 
 #[derive(FromForm)]
 pub struct SocketQuery<'r> {
-    #[field(name = "deviceId")]
+    #[field(name = "deviceid")]
     device_id: Option<&'r str>,
-    #[field(name = "ApiKey")]
+    #[field(name = "apikey")]
     api_key: Option<&'r str>,
-    #[field(name = "apiKey")]
-    legacy_api_key: Option<&'r str>,
 }
 
 /// Registers the client capabilities expected by Jellyfin clients before they
@@ -124,10 +122,7 @@ pub fn socket(
 ) -> Channel<'static> {
     let control = state.control.clone();
     let device = query.device_id.unwrap_or("unknown").to_string();
-    let authenticated = [query.api_key, query.legacy_api_key]
-        .into_iter()
-        .flatten()
-        .any(|key| key == crate::jellyfin::auth::ACCESS_TOKEN);
+    let authenticated = query.api_key == Some(crate::jellyfin::auth::ACCESS_TOKEN);
     ws.channel(move |stream| {
         Box::pin(async move {
             if !authenticated {

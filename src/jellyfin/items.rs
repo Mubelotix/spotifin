@@ -11,25 +11,23 @@ use crate::AppState;
 
 #[derive(FromForm)]
 pub struct ItemQuery {
-    #[field(name = "IncludeItemTypes")]
+    #[field(name = "includeitemtypes")]
     include_item_types: Option<String>,
-    #[field(name = "ParentId")]
+    #[field(name = "parentid")]
     parent_id: Option<String>,
-    #[field(name = "SearchTerm")]
+    #[field(name = "searchterm")]
     search_term: Option<String>,
-    #[field(name = "searchTerm")]
-    search_term_lowercase: Option<String>,
-    #[field(name = "Filters")]
+    #[field(name = "filters")]
     filters: Option<String>,
-    #[field(name = "ArtistIds")]
+    #[field(name = "artistids")]
     artist_ids: Option<String>,
-    #[field(name = "AlbumArtistIds")]
+    #[field(name = "albumartistids")]
     album_artist_ids: Option<String>,
-    #[field(name = "Ids")]
+    #[field(name = "ids")]
     ids: Option<String>,
-    #[field(name = "StartIndex")]
+    #[field(name = "startindex")]
     start_index: Option<usize>,
-    #[field(name = "Limit")]
+    #[field(name = "limit")]
     limit: Option<usize>,
 }
 
@@ -74,7 +72,6 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     let search = query
         .search_term
         .as_deref()
-        .or(query.search_term_lowercase.as_deref())
         .unwrap_or_default();
     let mut artist_ids = parse_ids(query.artist_ids.as_deref());
     let album_artist_ids = parse_ids(query.album_artist_ids.as_deref());
