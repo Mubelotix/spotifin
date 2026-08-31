@@ -23,6 +23,7 @@ pub struct Album {
     pub name: String,
     pub artist_ids: Vec<Uuid>,
     pub image: Option<String>,
+    pub year: Option<i32>,
 }
 
 #[derive(Clone)]
@@ -109,6 +110,10 @@ pub struct Catalog {
     pub albums: HashMap<Uuid, Album>,
     pub tracks: HashMap<Uuid, Track>,
     pub playlists: HashMap<Uuid, Playlist>,
+    /// Albums the user explicitly saved; the only ones listed as browsable.
+    pub saved_albums: HashSet<Uuid>,
+    /// Artists the user follows; the only ones listed as browsable.
+    pub followed_artists: HashSet<Uuid>,
     favorites: HashSet<Uuid>,
     play_counts: HashMap<Uuid, u32>,
 }
@@ -205,6 +210,16 @@ impl Catalog {
             return false;
         }
         if !types.is_empty() && !types.contains(&item.jellyfin_type()) {
+            return false;
+        }
+        // Derived albums/artists exist to decorate tracks; only the ones the
+        // user explicitly saved or followed are part of the library.
+        let listed = match item {
+            Item::Album(album) => self.saved_albums.contains(&album.id),
+            Item::Artist(artist) => self.followed_artists.contains(&artist.id),
+            _ => true,
+        };
+        if !listed {
             return false;
         }
         if let Some(term) = search {

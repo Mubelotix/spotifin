@@ -69,6 +69,7 @@ Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/sp
 - The Jellyfin catalog lives in `src/catalog.rs` (artists/albums/tracks/playlists, stable UUIDv5 ids derived from Spotify URIs). `src/spotify.rs` populates it by evaluating one collector script in the renderer via the bridge: rootlist playlists, Liked Songs (`PlaylistAPI.getPlaylist("spotify:user:me:collection")` — username part is ignored), saved albums with tracks (`Spicetify.GraphQL` `getAlbum`, field `tracksV2`), followed artists (`LibraryAPI.getContents`). A background task refreshes it at boot and every 15 min.
 - Jellyfin endpoints are in `src/jellyfin/*`, mounted under both `/api` and `/`. Implemented: auth stub (static user, any credentials accepted), `/Users/{id}/Views`, the `/Users/{id}/Items` query engine (types/parent/search/pagination), item detail, playlists (read/create/add/remove), favorites, PlaybackInfo, Instant Mix (random tracks), artwork redirects to `i.scdn.co`. Audio routes stream the shared recording for every track id.
 - Spotify Web API calls through CosmosAsync get 429 "Failed to fetch" from this client — use internal Platform APIs instead.
+- Album/artist browsing follows Spotify's "Your Library" semantics: only explicitly saved albums and followed artists are listed, even though track→album/artist metadata is kept for every library track.
 
 ## Hard-won container lessons
 

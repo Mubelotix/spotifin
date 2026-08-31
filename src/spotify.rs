@@ -29,6 +29,7 @@ const COLLECT_JS: &str = r#"
             name: a.name ?? fallbackName ?? "Album",
             year: a.date?.year ?? null,
             image,
+            artists: (a.artists?.items || []).map(x => ({ uri: x.uri ?? null, name: x.name ?? null })),
             tracks: (a.tracksV2?.items || []).filter(i => i.track).map(i => ({
                 uri: i.track.uri,
                 name: i.track.name ?? null,
@@ -102,6 +103,7 @@ fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
         if let (Some(uri), Some(name)) = (str_field(artist, "uri"), str_field(artist, "name")) {
             let id = catalog::stable_id(uri);
             catalog.artists.entry(id).or_insert(Artist { id, name: name.to_string() });
+            catalog.followed_artists.insert(id);
         }
     }
     Ok(catalog)
@@ -112,9 +114,27 @@ fn array_of(value: Option<&Value>) -> &[Value] {
     value.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&EMPTY)
 }
 
-/// Saved albums arrive with their full track list; register the tracks so
-/// album pages have children even when no playlist references them.
 fn add_saved_album(catalog: &mut Catalog, raw: &Value) {
+    let Some(uri) = str_field(raw, "uri") else {
+        return;
+    };
+    let id = catalog::stable_id(uri);
+    let artist_ids = artist_ids(catalog, raw.get("artists"));
+    let name = str_field(raw, "name").unwrap_or("Album").to_string();
+    let year = raw.get("year").and_then(Value::as_i64).map(|value| value as i32);
+    catalog.saved_albums.insert(id);
+    match catalog.albums.get_mut(&id) {
+        Some(album) => album.year = album.year.or(year),
+        None => {
+            catalog.albums.insert(id, Album {
+                id,
+                name,
+                artist_ids,
+                image: image_of(raw.get("image")),
+                year,
+            });
+        }
+    }
     let empty = Vec::new();
     let tracks = raw.get("tracks").and_then(Value::as_array).unwrap_or(&empty);
     for track in tracks {
@@ -176,6 +196,7 @@ fn add_album(catalog: &mut Catalog, raw: &Value, artist_ids: &[Uuid]) -> Option<
             name,
             artist_ids: artist_ids.to_vec(),
             image: image_of(raw.get("image")),
+            year: None,
         });
     }
     Some(id)

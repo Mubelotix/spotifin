@@ -155,6 +155,7 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
 fn fill_album(catalog: &Catalog, dto: &mut BaseItemDto, album: &crate::catalog::Album) {
     let count = catalog.tracks.values().filter(|t| t.album_id == Some(album.id)).count();
     dto.child_count = Some(count);
+    dto.production_year = album.year;
     dto.image_tags = image_tag(&album.image);
     let (names, refs) = artist_refs(catalog, &album.artist_ids);
     dto.album_artist = names.first().cloned();
