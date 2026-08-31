@@ -34,6 +34,7 @@ pub fn routes() -> Vec<Route> {
         playlists::create_playlist,
         playlists::add_to_playlist,
         playlists::remove_from_playlist,
+        playlists::move_entry,
         images::image,
         images::image_index,
         user_data::get_user_data,

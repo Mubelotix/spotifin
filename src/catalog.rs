@@ -42,6 +42,8 @@ pub struct Track {
 #[derive(Clone)]
 pub struct PlaylistEntry {
     pub id: Uuid,
+    /// Spotify row uid when the playlist is client-backed; drives reorder ops.
+    pub uid: Option<String>,
     pub track_id: Uuid,
 }
 
@@ -50,6 +52,8 @@ pub struct Playlist {
     pub id: Uuid,
     pub name: String,
     pub image: Option<String>,
+    /// Spotify URI for client-backed playlists; None for ephemeral ones.
+    pub spotify_uri: Option<String>,
     pub entries: Vec<PlaylistEntry>,
 }
 

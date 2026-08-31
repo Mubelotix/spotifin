@@ -73,6 +73,7 @@ Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/sp
 - Lyrics (`GET /Audio/{id}/Lyrics`, `src/jellyfin/lyrics.rs`) are fetched live through the bridge from `https://spclient.wg.spotify.com/color-lyrics/v2/track/{id}` via CosmosAsync — spclient IS reachable even though api.spotify.com is not. Returns 404 for local files and instrumental tracks.
 - Audio routes accept single-range `Range` requests (206 + `Content-Range` against the track's expected byte size) and answer HEAD via Rocket's automatic GET handling; this is what makes client seek bars work.
 - Spotify Web API calls through CosmosAsync get 429 "Failed to fetch" from this client — use internal Platform APIs instead.
+- Playlist mutations are real client operations: create via `RootlistAPI.applyModification({operation:"create",createItemKind:1,...})`, add/remove via `PlaylistAPI.add/remove(uri, rows, {})` (the `{}` options arg is mandatory), reorder via `PlaylistAPI.move` — whose `{before}/{after}` anchors accept `"start"`, `"end"` or row objects with `uid` (a bare URI string silently no-ops to "top"). Entry ids derive from Spotify row uids so they survive reorders. After any mutation, re-read the playlist (`fetch_playlist`) before absorbing it — never hold a catalog lock across a bridge await.
 - Album/artist browsing follows Spotify's "Your Library" semantics: only explicitly saved albums and followed artists are listed, even though track→album/artist metadata is kept for every library track.
 
 ## Hard-won container lessons

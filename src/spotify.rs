@@ -15,7 +15,17 @@ const COLLECT_JS: &str = r#"
             uri,
             name: p.metadata?.name ?? fallbackName ?? "Playlist",
             image: (p.metadata?.images && p.metadata.images[0]?.url) || null,
-            tracks: trackList(p.contents)
+            tracks: (p.contents?.items || []).filter(t => t.type === "track").map(t => ({
+                uid: t.uid ?? null,
+                uri: t.uri,
+                name: t.name ?? null,
+                album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
+                    image: (t.album.images && t.album.images[0]?.url) || null } : null,
+                artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
+                ms: t.duration?.milliseconds ?? null,
+                disc: t.discNumber ?? 0,
+                num: t.trackNumber ?? 0
+            }))
         };
     }
 
@@ -226,7 +236,7 @@ fn add_saved_album(catalog: &mut Catalog, raw: &Value) {
     }
 }
 
-fn add_playlist(catalog: &mut Catalog, raw: &Value) {
+pub(crate) fn add_playlist(catalog: &mut Catalog, raw: &Value) {
     let Some(uri) = str_field(raw, "uri") else {
         return;
     };
@@ -236,14 +246,22 @@ fn add_playlist(catalog: &mut Catalog, raw: &Value) {
     let tracks = raw.get("tracks").and_then(Value::as_array).unwrap_or(&empty);
     for (position, track_raw) in tracks.iter().enumerate() {
         if let Some(track_id) = add_track(catalog, track_raw) {
-            let key = format!("{id}:{position}");
-            entries.push(PlaylistEntry { id: catalog::stable_id(&key), track_id });
+            let key = match str_field(track_raw, "uid") {
+                Some(uid) => format!("{id}:spotify:{uid}"),
+                None => format!("{id}:{position}"),
+            };
+            entries.push(PlaylistEntry {
+                id: catalog::stable_id(&key),
+                uid: str_field(track_raw, "uid").map(str::to_string),
+                track_id,
+            });
         }
     }
     catalog.playlists.insert(id, Playlist {
         id,
         name: str_field(raw, "name").unwrap_or("Unnamed playlist").to_string(),
         image: image_of(raw.get("image")),
+        spotify_uri: Some(uri.to_string()),
         entries,
     });
 }
@@ -317,4 +335,126 @@ fn str_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 
 fn num_field(value: &Value, key: &str) -> u32 {
     value.get(key).and_then(Value::as_u64).unwrap_or(0) as u32
+}
+
+const CREATE_PLAYLIST_JS: &str = r#"
+(async () => {
+    const name = NAME_PLACEHOLDER;
+    const r = await Spicetify.Platform.RootlistAPI.applyModification({
+        operation: "create", createItemKind: 1, name
+    });
+    if (!r?.success || !r.uri) throw new Error("creation refused");
+    return r.uri;
+})()
+"#;
+
+const MODIFY_JS: &str = r#"
+(async () => {
+    const uri = PLAYLIST_PLACEHOLDER;
+    const api = Spicetify.Platform.PlaylistAPI;
+    await ACTION_PLACEHOLDER;
+    // The service applies mutations async; give the view time to settle.
+    await new Promise(r => setTimeout(r, 2000));
+    return "ok";
+})()
+"#;
+
+/// Fetches one playlist in the collector's raw shape so `add_playlist` can
+/// absorb it verbatim.
+const DUMP_PLAYLIST_JS: &str = r#"
+(async () => {
+    const uri = PLAYLIST_PLACEHOLDER;
+    const p = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri);
+    return JSON.stringify({
+        uri,
+        name: p.metadata?.name ?? null,
+        image: (p.metadata?.images && p.metadata.images[0]?.url) || null,
+        tracks: (p.contents?.items || []).filter(t => t.type === "track").map(t => ({
+            uid: t.uid ?? null,
+            uri: t.uri,
+            name: t.name ?? null,
+            album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
+                image: (t.album.images && t.album.images[0]?.url) || null } : null,
+            artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
+            ms: t.duration?.milliseconds ?? null,
+            disc: t.discNumber ?? 0,
+            num: t.trackNumber ?? 0
+        }))
+    });
+})()
+"#;
+
+fn playlist_uri_literal(spotify_uri: &str) -> String {
+    serde_json::to_string(spotify_uri).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+pub async fn create_playlist(bridge: &BridgeState, name: &str) -> Result<String, String> {
+    let literal = serde_json::to_string(name).map_err(|e| e.to_string())?;
+    let code = CREATE_PLAYLIST_JS.replace("NAME_PLACEHOLDER", &literal);
+    eval_string(bridge, code).await
+}
+
+async fn eval_string(bridge: &BridgeState, code: String) -> Result<String, String> {
+    let response = eval_on_bridge(bridge, code).await.map_err(|e| e.to_string())?;
+    response
+        .get("value")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "no value returned".to_string())
+}
+
+pub async fn add_tracks(bridge: &BridgeState, spotify_uri: &str, track_uris: &[String]) -> Result<(), String> {
+    let uris = serde_json::to_string(track_uris).map_err(|e| e.to_string())?;
+    let action = format!("api.add({},{},{{}})", playlist_uri_literal(spotify_uri), uris);
+    run_modify(bridge, spotify_uri, &action).await
+}
+
+pub async fn remove_rows(bridge: &BridgeState, spotify_uri: &str, uids: &[String]) -> Result<(), String> {
+    let rows: Vec<_> = uids.iter().map(|uid| serde_json::json!({"uid": uid})).collect();
+    let rows = serde_json::to_string(&rows).map_err(|e| e.to_string())?;
+    let action = format!("api.remove({},{},{{}})", playlist_uri_literal(spotify_uri), rows);
+    run_modify(bridge, spotify_uri, &action).await
+}
+
+/// Moves one row so it ends up directly after `anchor_uid` ("start" for top).
+pub async fn move_row(
+    bridge: &BridgeState,
+    spotify_uri: &str,
+    uid: &str,
+    anchor_after: Option<&str>,
+) -> Result<(), String> {
+    let anchor = match anchor_after {
+        Some(uid) => serde_json::to_string(&serde_json::json!({"uid": uid})).map_err(|e| e.to_string())?,
+        None => "\"start\"".to_string(),
+    };
+    let action = format!(
+        "api.move({},[{{uid:{}}}],{})",
+        playlist_uri_literal(spotify_uri),
+        serde_json::to_string(uid).map_err(|e| e.to_string())?,
+        anchor
+    );
+    run_modify(bridge, spotify_uri, &action).await
+}
+
+async fn run_modify(bridge: &BridgeState, spotify_uri: &str, action: &str) -> Result<(), String> {
+    let code = MODIFY_JS
+        .replace("PLAYLIST_PLACEHOLDER", &playlist_uri_literal(spotify_uri))
+        .replace("ACTION_PLACEHOLDER", action);
+    eval_on_bridge(bridge, code).await.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Fetches one playlist from the client in collector shape; absorb it with
+/// `absorb_playlist` without holding any lock across the await.
+pub async fn fetch_playlist(bridge: &BridgeState, spotify_uri: &str) -> Result<Value, String> {
+    let code = DUMP_PLAYLIST_JS.replace("PLAYLIST_PLACEHOLDER", &playlist_uri_literal(spotify_uri));
+    let response = eval_on_bridge(bridge, code).await.map_err(|e| e.to_string())?;
+    let raw = response
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "resync returned no value".to_string())?;
+    serde_json::from_str::<Value>(raw).map_err(|error| format!("resync JSON invalid: {error}"))
+}
+
+pub fn absorb_playlist(catalog: &mut Catalog, raw: &Value) {
+    add_playlist(catalog, raw);
 }
