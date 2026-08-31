@@ -33,6 +33,11 @@ pub struct CaptureSession {
     pub expected_bytes: u64,
 }
 
+/// The recorder is configured for a 192 kbps output stream.
+pub(crate) fn capture_bytes_for_duration(duration_ms: u64) -> u64 {
+    duration_ms.saturating_mul(24_000) / 1000
+}
+
 impl PlayerControl {
     /// Capture plan for `item`, if it is the one being recorded.
     pub async fn session_for(&self, item: uuid::Uuid) -> Option<CaptureSession> {
@@ -177,7 +182,7 @@ pub async fn prepare(
             reset_recorder();
             wait_recorder_restarted(recording, previous_len).await;
             let min_end = Instant::now() + Duration::from_millis(duration_ms);
-            let expected_bytes = duration_ms / 1000 * 24_000;
+            let expected_bytes = capture_bytes_for_duration(duration_ms);
             *state.player.inner.session.lock().await =
                 Some(CaptureSession { item: item_id, min_end, expected_bytes });
             *last = Some(item_id);

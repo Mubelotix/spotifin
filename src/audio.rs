@@ -49,6 +49,7 @@ fn audio_stream(
     path: Arc<PathBuf>,
     session: Option<player::CaptureSession>,
     window: Option<(u64, u64, u64)>,
+    content_length: Option<u64>,
     complete_file: bool,
     partial: bool,
 ) -> AudioResponse {
@@ -115,6 +116,9 @@ fn audio_stream(
     builder.header(ContentType::AAC);
     builder.raw_header("Cache-Control", "no-store");
     builder.raw_header("Accept-Ranges", "bytes");
+    if let Some(content_length) = content_length {
+        builder.raw_header("Content-Length", content_length.to_string());
+    }
     if partial {
         builder.status(Status::PartialContent);
         if let Some((start, end, total)) = window {
@@ -159,7 +163,7 @@ async fn cached_capture(state: &State<crate::AppState>, id: uuid::Uuid) -> Optio
     if duration_ms == 0 {
         return None;
     }
-    let expected_bytes = duration_ms / 1000 * 24_000;
+    let expected_bytes = player::capture_bytes_for_duration(duration_ms);
     let path = state.audio.cache.join(format!("{id}.aac"));
     let len = tokio::fs::metadata(&path).await.ok()?.len();
     (len + 6 * 24_000 >= expected_bytes).then_some((path, len))
@@ -191,6 +195,7 @@ async fn open_audio_stream(
             Arc::new(path),
             None,
             window,
+            window.map(|(start, end, _)| end - start + 1),
             true,
             explicit_range,
         ));
@@ -211,6 +216,10 @@ async fn open_audio_stream(
         state.audio.recording.clone(),
         session,
         window,
+        // Keep the live full-track response open-ended. The recorder flushes
+        // frequently enough to keep the client connected without classifying
+        // the response as a finite file that must be preloaded.
+        window.map(|(start, end, _)| end - start + 1),
         false,
         explicit_range,
     ))

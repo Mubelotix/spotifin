@@ -64,7 +64,7 @@ RUN mkdir -p /custom-cont-init.d \
         'chown abc:abc /config/.config/openbox/autostart' \
         'mkdir -p /config/audio/hls' \
         'chown -R abc:abc /config/audio' \
-        'setsid nohup su abc -s /bin/bash -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f adts /config/audio/recording.aac; sleep 2; done" >/dev/null 2>&1 &' \
+        'setsid nohup su abc -s /bin/bash -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -flush_packets 1 -f adts /config/audio/recording.aac; sleep 2; done" >/dev/null 2>&1 &' \
         'setsid nohup su abc -s /bin/bash -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f hls -hls_time 6 -hls_list_size 0 -hls_playlist_type event -hls_segment_filename /config/audio/hls/segment-%06d.ts /config/audio/hls/main.m3u8; sleep 2; done" >/dev/null 2>&1 &' \
         '[ -f /config/.config/spotify/prefs ] || touch /config/.config/spotify/prefs' \
         'chmod -R a+rwX /usr/share/spotify' \
