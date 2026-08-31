@@ -216,10 +216,12 @@ async fn open_audio_stream(
         state.audio.recording.clone(),
         session,
         window,
-        // Keep the live full-track response open-ended. The recorder flushes
-        // frequently enough to keep the client connected without classifying
-        // the response as a finite file that must be preloaded.
-        window.map(|(start, end, _)| end - start + 1),
+        // Advertise the known track length so native players do not speculate
+        // by opening several queued, uncached tracks at once. The body still
+        // waits for the recorder to produce the advertised bytes.
+        window
+            .map(|(start, end, _)| end - start + 1)
+            .or_else(|| session.map(|capture| capture.expected_bytes)),
         false,
         explicit_range,
     ))

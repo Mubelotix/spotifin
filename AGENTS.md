@@ -58,3 +58,7 @@ Spicetify plugins are env vars on `run-spotify.sh`: `SPICETIFY_EXTENSIONS` (defa
 - Iterate without rebuilding: `podman exec` into the running container, persist state under `/config`. Rebuild only once validated. The Rust build is deliberately the LAST Containerfile stage.
 - `podman restart` does not recreate a container from a newly built image; use `./run-spotify.sh` (or recreate the container) when testing image changes.
 - Debian trixie ships rustc 1.85; pin `time` (`cargo update -p time --precise 0.3.36`) or `--locked` builds fail inside the image.
+
+## Commit Conventions
+
+- Keep the commit subject short and specific. Use the commit body for a detailed explanation of what changed, why it was needed, and why the chosen implementation was used.

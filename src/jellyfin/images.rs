@@ -1,9 +1,18 @@
-use rocket::http::{uri::Absolute, Status};
-use rocket::response::Redirect;
+use rocket::http::Status;
+use rocket::response::{Responder, Response};
 use rocket::{get, State};
+use std::io::Cursor;
 use uuid::Uuid;
 
 use crate::AppState;
+
+pub struct ImageResponse(Response<'static>);
+
+impl<'r> Responder<'r, 'static> for ImageResponse {
+    fn respond_to(self, _: &'r rocket::Request<'_>) -> rocket::response::Result<'static> {
+        Ok(self.0)
+    }
+}
 
 fn image_url_of(state: &State<AppState>, item_id: Uuid) -> Option<String> {
     let catalog = state.catalog.read().unwrap();
@@ -33,22 +42,32 @@ fn cdn_url(image: &str) -> Option<String> {
 }
 
 #[get("/Items/<item_id>/Images/<image_type>")]
-pub fn image(item_id: Uuid, image_type: &str, state: &State<AppState>) -> Result<Redirect, Status> {
-    primary_image(item_id, image_type, state)
+pub async fn image(item_id: Uuid, image_type: &str, state: &State<AppState>) -> Result<ImageResponse, Status> {
+    primary_image(item_id, image_type, state).await
 }
 
 #[get("/Items/<item_id>/Images/<image_type>/<index>")]
-pub fn image_index(item_id: Uuid, image_type: &str, index: usize, state: &State<AppState>) -> Result<Redirect, Status> {
+pub async fn image_index(item_id: Uuid, image_type: &str, index: usize, state: &State<AppState>) -> Result<ImageResponse, Status> {
     let _ = index;
-    primary_image(item_id, image_type, state)
+    primary_image(item_id, image_type, state).await
 }
 
-fn primary_image(item_id: Uuid, image_type: &str, state: &State<AppState>) -> Result<Redirect, Status> {
+async fn primary_image(item_id: Uuid, image_type: &str, state: &State<AppState>) -> Result<ImageResponse, Status> {
     if !image_type.eq_ignore_ascii_case("primary") && !image_type.eq_ignore_ascii_case("backdrop") {
         return Err(Status::NotFound);
     }
     let image = image_url_of(state, item_id).ok_or(Status::NotFound)?;
     let url = cdn_url(&image).ok_or(Status::NotFound)?;
-    let absolute = Absolute::parse_owned(url).map_err(|_| Status::NotFound)?;
-    Ok(Redirect::to(absolute))
+    let bytes = tokio::process::Command::new("curl")
+        .args(["--fail", "--silent", "--show-error", "--location", &url])
+        .output()
+        .await
+        .map_err(|_| Status::BadGateway)?;
+    if !bytes.status.success() {
+        return Err(Status::BadGateway);
+    }
+    let mut response = Response::build();
+    response.header(rocket::http::ContentType::JPEG);
+    response.sized_body(bytes.stdout.len(), Cursor::new(bytes.stdout));
+    Ok(ImageResponse(response.finalize()))
 }

@@ -35,7 +35,7 @@ const COLLECT_JS: &str = r#"
                 album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
                     image: (t.album.images && t.album.images[0]?.url) || null } : null,
                 artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
-                ms: t.duration?.milliseconds ?? null,
+                ms: t.duration?.totalMilliseconds ?? t.duration?.milliseconds ?? null,
                 disc: t.discNumber ?? 0,
                 num: t.trackNumber ?? 0
             }))
@@ -58,7 +58,7 @@ const COLLECT_JS: &str = r#"
                 name: i.track.name ?? null,
                 album: { uri, name: a.name ?? fallbackName ?? null, image },
                 artists: (i.track.artists?.items || []).map(x => ({ uri: x.uri ?? null, name: x.name ?? null })),
-                ms: i.track.duration?.milliseconds ?? null,
+                ms: i.track.duration?.totalMilliseconds ?? i.track.duration?.milliseconds ?? null,
                 disc: i.track.discNumber ?? 0,
                 num: i.track.trackNumber ?? 0
             }))
@@ -72,7 +72,7 @@ const COLLECT_JS: &str = r#"
             album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
                 image: (t.album.images && t.album.images[0]?.url) || null } : null,
             artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
-            ms: t.duration?.milliseconds ?? null,
+            ms: t.duration?.totalMilliseconds ?? t.duration?.milliseconds ?? null,
             disc: t.discNumber ?? 0,
             num: t.trackNumber ?? 0
         }));
@@ -570,7 +570,7 @@ const DUMP_PLAYLIST_JS: &str = r#"
             album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
                 image: (t.album.images && t.album.images[0]?.url) || null } : null,
             artists: (t.artists || []).map(a => ({ uri: a.uri ?? null, name: a.name ?? null })),
-            ms: t.duration?.milliseconds ?? null,
+            ms: t.duration?.totalMilliseconds ?? t.duration?.milliseconds ?? null,
             disc: t.discNumber ?? 0,
             num: t.trackNumber ?? 0
         }))
