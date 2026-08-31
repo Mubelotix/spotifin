@@ -326,7 +326,11 @@ pub fn item_detail(item_id: Uuid, state: &State<AppState>) -> MaybeItem {
 }
 
 #[get("/Items/<item_id>/InstantMix?<query..>")]
-pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+pub async fn instant_mix(
+    item_id: Uuid,
+    query: ItemQuery,
+    state: &State<AppState>,
+) -> Result<Json<QueryResult<BaseItemDto>>, Status> {
     let limit = query.limit.unwrap_or(50);
     let seed_uri = {
         let catalog = state.catalog.read().unwrap();
@@ -341,6 +345,10 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
             _ => None,
         }
     };
+    if seed_uri.is_none() {
+        eprintln!("similar tracks failed: item {item_id} is not a track or album");
+        return Err(Status::NotFound);
+    }
     // Starting a Spotify station interrupts the track currently being captured.
     // Drop its capture before Spotify begins emitting the station's first item,
     // otherwise the shared recording can contain both tracks.
@@ -349,51 +357,67 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
     // ordered next tracks through the renderer's player state.
     let autoplay = crate::spotify::autoplay_tracks(&state.bridge, seed_uri.as_deref())
         .await
-        .unwrap_or_default();
+        .map_err(|error| {
+            eprintln!("similar tracks failed for item {item_id}: {error}");
+            Status::ServiceUnavailable
+        })?;
 
-    if !autoplay.is_empty() {
-        let first_mix_item = autoplay.first().and_then(|track| {
-            Some((
-                crate::catalog::stable_id(track.get("uri")?.as_str()?),
-                track.get("ms")?.as_u64()?,
-            ))
-        });
-        {
-            let mut catalog = state.catalog.write().unwrap();
-            for track in autoplay.iter().take(limit) {
-                crate::spotify::ingest_track(&mut catalog, track);
-            }
+    // AUTOPLAY_JS includes the seed/current track. A one-item result therefore
+    // means Spotify did not materialize any similar track at all.
+    if autoplay.len() < 2 {
+        eprintln!(
+            "similar tracks failed for item {item_id}: Spotify returned {} track(s), expected at least 2 (limit {limit}, seed {:?})",
+            autoplay.len(),
+            seed_uri,
+        );
+        return Err(Status::ServiceUnavailable);
+    }
+
+    let first_mix_item = autoplay.first().and_then(|track| {
+        Some((
+            crate::catalog::stable_id(track.get("uri")?.as_str()?),
+            track.get("ms")?.as_u64()?,
+        ))
+    });
+    {
+        let mut catalog = state.catalog.write().unwrap();
+        for track in autoplay.iter().take(limit) {
+            crate::spotify::ingest_track(&mut catalog, track);
         }
-        if let Some((id, duration_ms)) = first_mix_item {
-            state.player.adopt_mix_item(id, duration_ms).await;
-        }
+    }
+    if let Some((id, duration_ms)) = first_mix_item {
+        state.player.adopt_mix_item(id, duration_ms).await;
     }
 
     let catalog = state.catalog.read().unwrap();
-    let tracks: Vec<_> = if autoplay.is_empty() {
-        seed_uri
-            .as_deref()
-            .map(crate::catalog::stable_id)
-            .and_then(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
-            .into_iter()
-            .collect()
-    } else {
-        let ids = autoplay
-            .iter()
-            .take(limit)
-            .filter_map(|raw| raw.get("uri").and_then(Value::as_str))
-            .map(crate::catalog::stable_id)
-            .collect::<Vec<_>>();
-        ids.into_iter()
-            .filter_map(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
-            .collect()
-    };
+    let ids = autoplay
+        .iter()
+        .take(limit)
+        .filter_map(|raw| raw.get("uri").and_then(Value::as_str))
+        .map(crate::catalog::stable_id)
+        .collect::<Vec<_>>();
+    let tracks: Vec<_> = ids
+        .into_iter()
+        .filter_map(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
+        .collect();
+    if tracks.len() < 2 {
+        eprintln!(
+            "similar tracks failed for item {item_id}: only {} catalog track(s) remained after ingesting {} Spotify track(s)",
+            tracks.len(),
+            autoplay.len().min(limit),
+        );
+        return Err(Status::ServiceUnavailable);
+    }
     let dtos = tracks.iter().map(|track| base_item(&catalog, track, None)).collect();
-    Json(QueryResult { items: dtos, total_record_count: tracks.len(), start_index: 0 })
+    Ok(Json(QueryResult { items: dtos, total_record_count: tracks.len(), start_index: 0 }))
 }
 
 #[get("/Items/<item_id>/Similar?<query..>")]
-pub async fn similar(item_id: Uuid, query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+pub async fn similar(
+    item_id: Uuid,
+    query: ItemQuery,
+    state: &State<AppState>,
+) -> Result<Json<QueryResult<BaseItemDto>>, Status> {
     instant_mix(item_id, query, state).await
 }
 
