@@ -38,7 +38,7 @@ RUN printf '%s\n' \
         'flock -n 9 || exit 0' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
-        'ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server &' \
+        'ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server >> /tmp/backend-live.log 2>&1 &' \
         'exec dbus-launch --exit-with-session spotify --no-sandbox --disable-dev-shm-usage' \
         > /defaults/autostart \
     && chmod +x /defaults/autostart
@@ -63,8 +63,9 @@ RUN mkdir -p /custom-cont-init.d \
         'cat /defaults/autostart > /config/.config/openbox/autostart' \
         'chown abc:abc /config/.config/openbox/autostart' \
         'mkdir -p /config/audio/hls' \
-        'setsid nohup sh -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f adts /config/audio/recording.aac; sleep 2; done" >/dev/null 2>&1 &' \
-        'setsid nohup sh -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f hls -hls_time 6 -hls_list_size 0 -hls_playlist_type event -hls_segment_filename /config/audio/hls/segment-%06d.ts /config/audio/hls/main.m3u8; sleep 2; done" >/dev/null 2>&1 &' \
+        'chown -R abc:abc /config/audio' \
+        'setsid nohup su abc -s /bin/bash -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f adts /config/audio/recording.aac; sleep 2; done" >/dev/null 2>&1 &' \
+        'setsid nohup su abc -s /bin/bash -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f hls -hls_time 6 -hls_list_size 0 -hls_playlist_type event -hls_segment_filename /config/audio/hls/segment-%06d.ts /config/audio/hls/main.m3u8; sleep 2; done" >/dev/null 2>&1 &' \
         '[ -f /config/.config/spotify/prefs ] || touch /config/.config/spotify/prefs' \
         'chmod -R a+rwX /usr/share/spotify' \
         'if [ ! -f "$CFG" ]; then' \

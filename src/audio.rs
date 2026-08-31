@@ -18,6 +18,7 @@ pub fn routes() -> Vec<Route> {
     routes![
             universal,
             file_alias,
+            item_file_alias,
             stream_alias,
             stream_mp3,
             stream_aac,
@@ -169,6 +170,7 @@ async fn open_audio_stream(
     item_id: &str,
     range: RangeHeader,
 ) -> Result<AudioResponse, rocket::http::Status> {
+    eprintln!("audio request: item={item_id} range={:?}", range.0);
     let Ok(id) = uuid::Uuid::parse_str(item_id) else {
         return Err(rocket::http::Status::NotFound);
     };
@@ -223,6 +225,13 @@ pub async fn universal(state: &State<crate::AppState>, item_id: &str, range: Ran
 
 #[get("/Audio/<item_id>/File")]
 pub async fn file_alias(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    open_audio_stream(state, item_id, range).await
+}
+
+/// Finamp's direct-play path follows Jellyfin's item endpoint rather than the
+/// media-source path returned in PlaybackInfo.
+#[get("/Items/<item_id>/File")]
+pub async fn item_file_alias(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
     open_audio_stream(state, item_id, range).await
 }
 
