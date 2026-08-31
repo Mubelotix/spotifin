@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::AppState;
 
-fn time_code(ms: u64) -> String {
-    format!("{:02}:{:02}:{:02}.{:03}", ms / 3_600_000, ms % 3_600_000 / 60_000, ms % 60_000 / 1000, ms % 1000)
+fn ticks(ms: u64) -> u64 {
+    ms * 10_000
 }
 
 /// TARGET.md LyricDto shape; synced lines carry their start time.
@@ -24,28 +24,49 @@ pub async fn lyrics(item_id: Uuid, state: &State<AppState>) -> Result<Json<Value
         (track.uri.clone(), track.name.clone(), artist)
     };
 
-    let lines = crate::spotify::lyrics(&state.bridge, &uri).await.map_err(|_| Status::NotFound)?;
-    if lines.is_empty() {
-        return Err(Status::NotFound);
+    let cache_path = crate::jellyfin::dto::lyrics_cache_path(item_id);
+    if let Ok(raw) = tokio::fs::read(&cache_path).await {
+        let cached: Value = serde_json::from_slice(&raw).map_err(|_| Status::NotFound)?;
+        if let Some(lines) = cached.get("Lyrics").and_then(Value::as_array) {
+            if !lines.is_empty() {
+                return Ok(Json(cached));
+            }
+            return Err(Status::NotFound);
+        }
     }
 
+    let lines = crate::spotify::lyrics(&state.bridge, &uri).await.map_err(|_| Status::NotFound)?;
     let synced = lines.iter().any(|line| line.start_ms > 0);
     let lyrics: Vec<Value> = lines
         .iter()
         .map(|line| {
             serde_json::json!({
                 "Text": line.text,
-                "Start": time_code(line.start_ms),
+                "Start": ticks(line.start_ms),
+                "Cues": line.cues.as_ref().map(|cues| cues.iter().map(|cue| serde_json::json!({
+                    "Position": cue.position,
+                    "EndPosition": cue.end_position,
+                    "Start": ticks(cue.start_ms),
+                    "End": cue.end_ms.map(ticks),
+                })).collect::<Vec<_>>()),
             })
         })
         .collect();
 
-    Ok(Json(serde_json::json!({
+    let response = serde_json::json!({
         "Metadata": {
             "Title": title,
             "Artist": artist,
             "IsSynced": synced,
         },
         "Lyrics": lyrics,
-    })))
+    });
+    tokio::fs::create_dir_all(&*state.audio.cache).await.map_err(|_| Status::InternalServerError)?;
+    tokio::fs::write(&cache_path, serde_json::to_vec(&response).map_err(|_| Status::InternalServerError)?)
+        .await
+        .map_err(|_| Status::InternalServerError)?;
+    if lines.is_empty() {
+        return Err(Status::NotFound);
+    }
+    Ok(Json(response))
 }

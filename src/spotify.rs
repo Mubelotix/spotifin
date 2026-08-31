@@ -283,16 +283,41 @@ const LYRICS_JS: &str = r#"
         "https://spclient.wg.spotify.com/color-lyrics/v2/track/" + id +
         "?format=json&vocalRemoval=false&market=from_token"
     );
-    return JSON.stringify((r?.lyrics?.lines || []).map(l => ({
-        start: Number(l.startTimeMs ?? 0),
-        text: l.words ?? ""
-    })));
+    return JSON.stringify((r?.lyrics?.lines || []).map(l => {
+        const words = l.syllables || l.wordsWithTimestamps;
+        if (Array.isArray(words) && words.length > 0) {
+            const text = l.words ?? "";
+            let position = 0;
+            const cues = words.map(word => {
+                const cueText = word.syllable ?? word.word ?? word.text ?? "";
+                const found = text.indexOf(cueText, position);
+                const cuePosition = found >= 0 ? found : position;
+                position = cuePosition + cueText.length;
+                return {
+                    position: cuePosition,
+                    endPosition: position,
+                    start: Number(word.startTimeMs ?? 0),
+                    end: Number(word.endTimeMs ?? 0)
+                };
+            });
+            return { start: Number(l.startTimeMs ?? 0), text, cues };
+        }
+        return { start: Number(l.startTimeMs ?? 0), text: l.words ?? "" };
+    }));
 })()
 "#;
 
 pub struct Lyric {
     pub start_ms: u64,
     pub text: String,
+    pub cues: Option<Vec<LyricCue>>,
+}
+
+pub struct LyricCue {
+    pub position: u32,
+    pub end_position: u32,
+    pub start_ms: u64,
+    pub end_ms: Option<u64>,
 }
 
 pub async fn lyrics(bridge: &BridgeState, track_uri: &str) -> Result<Vec<Lyric>, String> {
@@ -315,6 +340,16 @@ pub async fn lyrics(bridge: &BridgeState, track_uri: &str) -> Result<Vec<Lyric>,
             Some(Lyric {
                 start_ms: line.get("start")?.as_u64()?,
                 text: str_field(line, "text")?.to_string(),
+                cues: line.get("cues").and_then(Value::as_array).map(|cues| {
+                    cues.iter()
+                        .filter_map(|cue| Some(LyricCue {
+                            position: cue.get("position")?.as_u64()? as u32,
+                            end_position: cue.get("endPosition")?.as_u64()? as u32,
+                            start_ms: cue.get("start")?.as_u64()?,
+                            end_ms: cue.get("end").and_then(Value::as_u64),
+                        }))
+                        .collect()
+                }),
             })
         })
         .collect())

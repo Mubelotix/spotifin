@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::catalog::{Catalog, Item};
@@ -61,10 +62,19 @@ pub struct BaseItemDto {
     pub album_artists: Option<Vec<IdName>>,
     pub run_time_ticks: Option<u64>,
     pub container: Option<&'static str>,
+    pub has_lyrics: Option<bool>,
     pub production_year: Option<i32>,
     pub image_tags: Option<ImageTags>,
     pub user_data: Option<UserItemData>,
     pub playlist_item_id: Option<Uuid>,
+}
+
+pub fn lyrics_cache_path(id: Uuid) -> PathBuf {
+    std::env::var_os("AUDIO_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new("data/audio").to_path_buf())
+        .join("cache")
+        .join(format!("lyrics-{id}.json"))
 }
 
 pub fn user_data(catalog: &Catalog, id: Uuid) -> UserItemData {
@@ -152,6 +162,7 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         album_artists: None,
         run_time_ticks: None,
         container: None,
+        has_lyrics: None,
         production_year: None,
         image_tags: None,
         user_data: Some(user_data(catalog, item.id())),
@@ -177,6 +188,13 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
     dto.parent_index_number = Some(track.disc);
     dto.run_time_ticks = Some(track.duration_ms * TICKS_PER_MS);
     dto.container = Some("mp3");
+    dto.has_lyrics = Some(match std::fs::read(lyrics_cache_path(track.id)) {
+        Ok(raw) => serde_json::from_slice::<serde_json::Value>(&raw)
+            .ok()
+            .and_then(|json| json.get("Lyrics")?.as_array().map(|lyrics| !lyrics.is_empty()))
+            .unwrap_or(true),
+        Err(_) => true,
+    });
     if let Some(album) = track.album_id.and_then(|id| catalog.albums.get(&id)) {
         dto.album = Some(album.name.clone());
         dto.album_id = Some(album.id);
