@@ -2,24 +2,24 @@
 
 | Feature | Finamp | Fintunes | Yuzic | Jellify | CassetteCat | Wavio | Linthra | Coppelia | JellyBoxPlayer |
 |---|---|---|---|---|---|---|---|---|---|
-| Login | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  |  |
-| View library | ✅ | ✅ | ✅ | ✅ | ⚠️ Without Playlists | ✅ |  |  |
-| View artist | ✅ | ⚠️ Saved content only | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ |  |  |
-| View album | ✅ | ⚠️ From search | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ |  |  |
-| Remote Search | ⚠️ Only songs | ✅ | ⚠️ Only songs | ⚠️ Only songs | ✖️ Local only | ⚠️ Only songs |  |  |
-| Play an uncached track | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  |  |
-| Play a cached track | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  |  |
-| Download tracks | ✅ | ✅ Whole albums | ✅ Whole album or artist | ✅ | ✅ | ✅ |  |  |
-| Autoplay | ✅ | ⚠️ From search | ✅ | ✅ | ✅ | ✅ |  |  |
-| Skip tracks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  |  |
-| Seek forward and backward | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |  |  |
-| Like/Unlike | ✅ | ✖️ | ✅ | ✅ | ✅ | ✅ |  |  |
-| Create a playlist | ✅ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ |  |  |
-| Edit playlist content | ✅ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ |  |  |
-| Remove playlist | ✖️ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ |  |  |
-| Display lyrics | ✖️ | ✅ | ✅ | ✅ | ⚠️ From LRCLib | ✅ |  |  |
-| Follow artist | ✅ | ⚠️ Saved content only | ✖️ | ✅ | ✖️ | ✅ |  |  |
-| Save album | ✅ | ✖️ | ✖️ | ✅ | ✖️ | ✅ |  |  |
+| Login | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  |
+| View library | ✅ | ✅ | ✅ | ✅ | ⚠️ Without Playlists | ✅ | ✅ |  |
+| View artist | ✅ | ⚠️ Saved content only | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ | ⚠️ Saved content only |  |
+| View album | ✅ | ⚠️ From search | ⚠️ Saved content only | ✅ | ⚠️ Saved content only | ✅ | ⚠️ Saved content only |  |
+| Remote Search | ⚠️ Only songs | ✅ | ⚠️ Only songs | ⚠️ Only songs | ✖️ | ⚠️ Only songs | ✖️ |  |
+| Play an uncached track | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ Slow to settle |  |
+| Play a cached track | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  |
+| Download tracks | ✅ | ✅ Whole albums | ✅ Whole album or artist | ✅ | ✅ | ✅ | ✅ |  |
+| Autoplay | ✅ | ⚠️ From search | ✅ | ✅ | ✅ | ✅ | ✖️ |  |
+| Skip tracks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  |
+| Seek forward and backward |  |  | | ❌ | ❌ | ❌ | ✅ |  |
+| Like/Unlike | ✅ | ✖️ | ✅ | ✅ | ✅ | ✅ | ✖️ |  |
+| Create a playlist | ✅ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ | ✅ |  |
+| Edit playlist content | ✅ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ | ✅ |  |
+| Remove playlist | ✖️ | ✖️ | ✅ | ✅ | ✖️ Local only | ✅ | ✅ |  |
+| Display lyrics | ✖️ | ✅ | ✅ | ✅ | ⚠️ From LRCLib | ✅ | ✅ |  |
+| Follow artist | ✅ | ⚠️ Saved content only | ✖️ | ✅ | ✖️ | ✅ | ✖️ |  |
+| Save album | ✅ | ✖️ | ✖️ | ✅ | ✖️ | ✅ | ✖️ |  |
 
 ### Legend
 
