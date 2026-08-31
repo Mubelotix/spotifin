@@ -34,6 +34,7 @@ pub struct UserItemData {
     pub played: bool,
     pub play_count: u32,
     pub playback_position_ticks: u64,
+    pub last_played_date: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -64,15 +65,45 @@ pub struct BaseItemDto {
 }
 
 pub fn user_data(catalog: &Catalog, id: Uuid) -> UserItemData {
-    let favorite = catalog.is_favorite(id);
     let count = catalog.play_count(id);
     UserItemData {
         item_id: id,
-        is_favorite: favorite,
+        is_favorite: catalog.is_favorite(id),
         played: count > 0,
         play_count: count,
-        playback_position_ticks: 0,
+        playback_position_ticks: catalog.position_ticks(id),
+        last_played_date: catalog
+            .last_played(id)
+            .map(|ms| chrono_like_iso(ms)),
     }
+}
+
+/// RFC 3339 with second precision; no chrono dependency for one format.
+fn chrono_like_iso(ms: i64) -> String {
+    const SECONDS_PER_DAY: i64 = 86_400;
+    let secs = ms / 1000;
+    let days = secs / SECONDS_PER_DAY;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        secs % SECONDS_PER_DAY / 3600,
+        secs % 3600 / 60,
+        secs % 60
+    )
+}
+
+/// Days-since-epoch to civil date (Howard Hinnant's algorithm).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 fn artist_refs(catalog: &Catalog, ids: &[Uuid]) -> (Vec<String>, Vec<IdName>) {

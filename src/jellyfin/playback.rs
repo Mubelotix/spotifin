@@ -49,16 +49,41 @@ fn playback_info(item_id: Uuid, state: &State<AppState>) -> Result<Json<Value>, 
     })))
 }
 
-/// Playback reporting is accepted but not persisted; the Spotify client owns
-/// the playback cursor.
-#[post("/Sessions/Playing", data = "<_body>")]
-pub fn playing_started(_body: Json<Value>) {}
+/// Playback reporting is stored as-is for UserData; the Spotify client owns
+/// the real cursor, so these values are informational only.
+#[post("/Sessions/Playing", data = "<body>")]
+pub fn playing_started(state: &State<AppState>, body: Json<Value>) {
+    record(state, &body, Report::Start);
+}
 
-#[post("/Sessions/Playing/Progress", data = "<_body>")]
-pub fn playing_progress(_body: Json<Value>) {}
+#[post("/Sessions/Playing/Progress", data = "<body>")]
+pub fn playing_progress(state: &State<AppState>, body: Json<Value>) {
+    record(state, &body, Report::Progress);
+}
 
-#[post("/Sessions/Playing/Stopped", data = "<_body>")]
-pub fn playing_stopped(_body: Json<Value>) {}
+#[post("/Sessions/Playing/Stopped", data = "<body>")]
+pub fn playing_stopped(state: &State<AppState>, body: Json<Value>) {
+    record(state, &body, Report::Stop);
+}
+
+enum Report {
+    Start,
+    Progress,
+    Stop,
+}
+
+fn record(state: &State<AppState>, body: &Value, kind: Report) {
+    let Some(item) = body.get("ItemId").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) else {
+        return;
+    };
+    let ticks = body.get("PositionTicks").and_then(Value::as_u64).unwrap_or(0);
+    let mut catalog = state.catalog.write().unwrap();
+    match kind {
+        Report::Start => catalog.note_started(item),
+        Report::Progress => catalog.note_progress(item, ticks),
+        Report::Stop => catalog.note_stopped(item, ticks),
+    }
+}
 
 #[get("/Sessions/Playing/Ping")]
 pub fn playing_ping() -> Status {

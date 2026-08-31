@@ -27,6 +27,7 @@ fn update_user_data(user_id: Uuid, item_id: Uuid, body: Json<serde_json::Value>,
             played: false,
             play_count: 0,
             playback_position_ticks: 0,
+            last_played_date: None,
         });
     }
     if let Some(favorite) = body.0.get("IsFavorite").and_then(serde_json::Value::as_bool) {

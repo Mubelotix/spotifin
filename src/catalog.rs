@@ -108,6 +108,13 @@ pub fn library_id() -> Uuid {
     stable_id("library:music")
 }
 
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Jellyfin-style search: every whitespace-separated word must match somewhere
 /// in the track's name, album or artists ("darude sandstorm" finds "Sandstorm"
 /// by Darude).
@@ -136,6 +143,10 @@ pub struct Catalog {
     pub followed_artists: HashSet<Uuid>,
     favorites: HashSet<Uuid>,
     play_counts: HashMap<Uuid, u32>,
+    /// Last reported playback position in ticks; the Spotify client owns the
+    /// real cursor, we only remember what clients tell us.
+    positions: HashMap<Uuid, u64>,
+    last_played: HashMap<Uuid, i64>,
 }
 
 impl Catalog {
@@ -149,6 +160,8 @@ impl Catalog {
     pub fn merge(&mut self, mut fresh: Catalog) {
         fresh.favorites = std::mem::take(&mut self.favorites);
         fresh.play_counts = std::mem::take(&mut self.play_counts);
+        fresh.positions = std::mem::take(&mut self.positions);
+        fresh.last_played = std::mem::take(&mut self.last_played);
         for (id, track) in std::mem::take(&mut self.tracks) {
             fresh.tracks.entry(id).or_insert(track);
         }
@@ -191,6 +204,36 @@ impl Catalog {
 
     pub fn play_count(&self, id: Uuid) -> u32 {
         self.play_counts.get(&id).copied().unwrap_or(0)
+    }
+
+    pub fn position_ticks(&self, id: Uuid) -> u64 {
+        self.positions.get(&id).copied().unwrap_or(0)
+    }
+
+    pub fn last_played(&self, id: Uuid) -> Option<i64> {
+        self.last_played.get(&id).copied()
+    }
+
+    pub fn note_progress(&mut self, id: Uuid, ticks: u64) {
+        self.positions.insert(id, ticks);
+        self.last_played.entry(id).or_insert_with(now_millis);
+    }
+
+    pub fn note_stopped(&mut self, id: Uuid, ticks: u64) {
+        let finished = ticks > 0;
+        self.note_progress(id, ticks);
+        if finished {
+            *self.play_counts.entry(id).or_insert(0) += 1;
+            self.last_played.insert(id, now_millis());
+        }
+    }
+
+    pub fn note_started(&mut self, id: Uuid) {
+        self.note_progress(id, 0);
+    }
+
+    pub fn bump_play_count(&mut self, id: Uuid) {
+        *self.play_counts.entry(id).or_insert(0) += 1;
     }
 
     /// Direct children of `parent`; with the whole catalog when recursive.
