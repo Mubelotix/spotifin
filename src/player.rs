@@ -1,5 +1,5 @@
 use std::process::Command;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
@@ -14,6 +14,7 @@ struct PlayerInner {
     last_switch: Mutex<Option<Instant>>,
     requested_item: Mutex<Option<uuid::Uuid>>,
     session: Mutex<Option<CaptureSession>>,
+    live_streams: AtomicUsize,
     last_activity: StdMutex<Option<Instant>>,
     idle_paused: StdMutex<bool>,
 }
@@ -53,6 +54,18 @@ impl PlayerControl {
             Some(session) if session.item == item => Some(*session),
             _ => None,
         }
+    }
+
+    pub(crate) fn stream_started(&self) {
+        self.inner.live_streams.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn stream_finished(&self) {
+        self.inner.live_streams.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    fn has_live_stream(&self) -> bool {
+        self.inner.live_streams.load(Ordering::Acquire) != 0
     }
 
     /// True while some requested track may still be sounding: pausing would
@@ -202,6 +215,14 @@ pub async fn prepare(
         .is_some_and(|session| Instant::now() < session.min_end);
     if *last == Some(item_id) && still_capturing {
         return true;
+    }
+    // Yuzic preloads the next two queue entries. Their URLs look identical to
+    // the active URL, but switching Spotify for one of them would make the
+    // current stream contain the wrong track. A real skip closes the old
+    // stream first, so use that boundary rather than blocking for the song's
+    // full duration.
+    if *last != Some(item_id) && state.player.has_live_stream() {
+        return false;
     }
     // Native players probe several queued URLs immediately after a selection.
     // Do not let those probes retune the shared Spotify player; a later request

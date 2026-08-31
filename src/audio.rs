@@ -47,6 +47,8 @@ impl<'r> Responder<'r, 'static> for AudioResponse {
 /// to the requested window.
 fn audio_stream(
     path: Arc<PathBuf>,
+    control: player::PlayerControl,
+    live_capture: bool,
     session: Option<player::CaptureSession>,
     window: Option<(u64, u64, u64)>,
     content_length: Option<u64>,
@@ -54,6 +56,9 @@ fn audio_stream(
     partial: bool,
 ) -> AudioResponse {
     let (reader, mut writer) = tokio::io::duplex(64 * 1024);
+    if live_capture {
+        control.stream_started();
+    }
     tokio::spawn(async move {
         let mut offset = window.map(|(start, _, _)| start).unwrap_or(0);
         loop {
@@ -111,6 +116,9 @@ fn audio_stream(
                 }
                 Err(_) => sleep(Duration::from_millis(250)).await,
             }
+        }
+        if live_capture {
+            control.stream_finished();
         }
     });
 
@@ -195,6 +203,8 @@ async fn open_audio_stream(
             .or(Some((0, len.saturating_sub(1), len)));
         return Ok(audio_stream(
             Arc::new(path),
+            state.player.clone(),
+            false,
             None,
             window,
             window.map(|(start, end, _)| end - start + 1),
@@ -218,6 +228,8 @@ async fn open_audio_stream(
         .map(|(start, end)| (start, end, total));
     Ok(audio_stream(
         state.audio.recording.clone(),
+        state.player.clone(),
+        true,
         session,
         window,
         // Advertise the known track length so native players do not speculate
