@@ -116,6 +116,27 @@ pub async fn items(query: ItemQuery, state: &State<AppState>) -> Json<QueryResul
 
 type MaybeItem = Result<Json<BaseItemDto>, Status>;
 
+/// The artist index is library-scoped: followed artists only, no remote search.
+async fn artist_index(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+    let catalog = state.catalog.read().unwrap();
+    let term = query.search_term.as_deref().filter(|term| !term.is_empty());
+    let found = catalog.query(&["MusicArtist"], None, term);
+    let start = query.start_index.unwrap_or(0);
+    let (items, total) = page(found, start, query.limit);
+    let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();
+    Json(QueryResult { items: dtos, total_record_count: total, start_index: start })
+}
+
+#[get("/Artists/AlbumArtists?<query..>")]
+pub async fn album_artists(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+    artist_index(query, state).await
+}
+
+#[get("/Artists?<query..>", rank = 2)]
+pub async fn all_artists(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+    artist_index(query, state).await
+}
+
 #[get("/Users/<user_id>/Items/<item_id>")]
 pub fn user_item(user_id: Uuid, item_id: Uuid, state: &State<AppState>) -> MaybeItem {
     if user_id != crate::jellyfin::auth::user_id() {
@@ -134,8 +155,7 @@ pub fn item_detail(item_id: Uuid, state: &State<AppState>) -> MaybeItem {
 }
 
 #[get("/Items/<item_id>/InstantMix")]
-pub fn instant_mix(item_id: Uuid, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
-    let catalog = state.catalog.read().unwrap();
+pub fn instant_mix(item_id: Uuid, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {    let catalog = state.catalog.read().unwrap();
     let seed = catalog.item(item_id).map(|item| item.name().to_string());
     let mut tracks = catalog.random_tracks(25);
     // Mixes seeded by the source item keep a stable flavor per item.
@@ -144,4 +164,20 @@ pub fn instant_mix(item_id: Uuid, state: &State<AppState>) -> Json<QueryResult<B
     }
     let dtos = tracks.iter().map(|track| base_item(&catalog, track, None)).collect();
     Json(QueryResult { items: dtos, total_record_count: tracks.len(), start_index: 0 })
+}
+
+/// None of the client-facing data sources expose genres, so both families
+/// answer with an empty result rather than 404.
+fn empty_result() -> Json<QueryResult<BaseItemDto>> {
+    Json(QueryResult { items: vec![], total_record_count: 0, start_index: 0 })
+}
+
+#[get("/Genres")]
+pub fn genres() -> Json<QueryResult<BaseItemDto>> {
+    empty_result()
+}
+
+#[get("/MusicGenres")]
+pub fn music_genres() -> Json<QueryResult<BaseItemDto>> {
+    empty_result()
 }
