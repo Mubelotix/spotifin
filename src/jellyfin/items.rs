@@ -135,9 +135,18 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
         match crate::spotify::search(&state.bridge, search).await {
             Ok(results) => {
                 eprintln!("remote search {:?} -> {} results", search, results.len());
-                let mut catalog = state.catalog.write().unwrap();
+                {
+                    let mut catalog = state.catalog.write().unwrap();
+                    for track in &results {
+                        if let Some(id) = crate::spotify::ingest_track(&mut catalog, track) {
+                            catalog.mark_remote_track(id);
+                        }
+                    }
+                }
                 for track in &results {
-                    crate::spotify::ingest_track(&mut catalog, track);
+                    if let Err(error) = crate::spotify::cache_remote_track(&state.audio.cache, track).await {
+                        eprintln!("could not cache remote track: {error}");
+                    }
                 }
             }
             Err(error) => eprintln!("remote search failed: {error}"),

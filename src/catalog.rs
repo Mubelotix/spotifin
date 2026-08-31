@@ -147,6 +147,9 @@ pub struct Catalog {
     pub saved_albums: HashSet<Uuid>,
     /// Artists the user follows; the only ones listed as browsable.
     pub followed_artists: HashSet<Uuid>,
+    /// Tracks learned from remote search; retained for direct playback but not
+    /// shown as part of the browsable library.
+    pub remote_tracks: HashSet<Uuid>,
     favorites: HashSet<Uuid>,
     likes: HashMap<Uuid, bool>,
     play_counts: HashMap<Uuid, u32>,
@@ -169,10 +172,15 @@ impl Catalog {
         fresh.favorites.extend(old_favorites.into_iter().filter(|id| !fresh.tracks.contains_key(id)));
         let old_likes = std::mem::take(&mut self.likes);
         fresh.likes.extend(old_likes.into_iter().filter(|(id, _)| !fresh.tracks.contains_key(id)));
+        let old_remote_tracks = std::mem::take(&mut self.remote_tracks);
+        fresh.remote_tracks.extend(old_remote_tracks.into_iter().filter(|id| !fresh.tracks.contains_key(id)));
         fresh.play_counts = std::mem::take(&mut self.play_counts);
         fresh.positions = std::mem::take(&mut self.positions);
         fresh.last_played = std::mem::take(&mut self.last_played);
         for (id, track) in std::mem::take(&mut self.tracks) {
+            if track.uri.starts_with("spotify:local:") {
+                continue;
+            }
             fresh.tracks.entry(id).or_insert(track);
         }
         for (id, album) in std::mem::take(&mut self.albums) {
@@ -263,6 +271,10 @@ impl Catalog {
 
     pub fn bump_play_count(&mut self, id: Uuid) {
         *self.play_counts.entry(id).or_insert(0) += 1;
+    }
+
+    pub fn mark_remote_track(&mut self, id: Uuid) {
+        self.remote_tracks.insert(id);
     }
 
     /// Direct children of `parent`; with the whole catalog when recursive.
@@ -357,7 +369,14 @@ impl Catalog {
                 self.saved_albums.contains(&album.id) || !artist_ids.is_empty() || !album_artist_ids.is_empty()
             }
             Item::Artist(artist) => self.followed_artists.contains(&artist.id),
-            _ => true,
+            Item::Track(track) => {
+                !self.remote_tracks.contains(&track.id)
+                    || search.is_some()
+                    || parent.is_some()
+                    || !artist_ids.is_empty()
+                    || !album_artist_ids.is_empty()
+            }
+            Item::Library(_) | Item::Playlist(_) => true,
         };
         if !listed {
             return false;

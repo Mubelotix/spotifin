@@ -28,7 +28,7 @@ const COLLECT_JS: &str = r#"
             name: first.metadata?.name ?? fallbackName ?? "Playlist",
             liked,
             image: (first.metadata?.images && first.metadata.images[0]?.url) || null,
-            tracks: items.filter(t => t.type === "track").map(t => ({
+            tracks: items.filter(t => t.type === "track" && !t.uri?.startsWith("spotify:local:")).map(t => ({
                 uid: t.uid ?? null,
                 uri: t.uri,
                 name: t.name ?? null,
@@ -66,7 +66,7 @@ const COLLECT_JS: &str = r#"
     }
 
     function trackList(contents) {
-        return (contents?.items || []).filter(t => t.type === "track").map(t => ({
+        return (contents?.items || []).filter(t => t.type === "track" && !t.uri?.startsWith("spotify:local:")).map(t => ({
             uri: t.uri,
             name: t.name ?? null,
             album: t.album ? { uri: t.album.uri ?? null, name: t.album.name ?? null,
@@ -190,7 +190,10 @@ pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
         if !path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("playlist-") && name.ends_with(".json"))
+            .is_some_and(|name| {
+                (name.starts_with("playlist-") || name.starts_with("track-"))
+                    && name.ends_with(".json")
+            })
         {
             continue;
         }
@@ -201,7 +204,18 @@ pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
             continue;
         };
         if value.get("uri").and_then(Value::as_str).is_some() {
-            add_playlist(&mut catalog, &value);
+            let remote = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("track-"));
+            let id = catalog::stable_id(value.get("uri").and_then(Value::as_str).unwrap());
+            if remote {
+                if ingest_track(&mut catalog, &value).is_some() {
+                    catalog.mark_remote_track(id);
+                }
+            } else {
+                add_playlist(&mut catalog, &value);
+            }
         }
     }
     catalog
@@ -222,13 +236,29 @@ pub async fn cache_playlist(cache_dir: &Path, raw: &Value) -> Result<(), String>
     tokio::fs::rename(&temporary, &path).await.map_err(|error| error.to_string())
 }
 
+/// Persists a search result separately from the browsable library. The raw
+/// renderer shape is enough to reconstruct the stable item id and playback
+/// metadata after a backend restart.
+pub async fn cache_remote_track(cache_dir: &Path, raw: &Value) -> Result<(), String> {
+    let uri = raw
+        .get("uri")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "search result has no URI".to_string())?;
+    let id = catalog::stable_id(uri);
+    let json = serde_json::to_vec_pretty(raw).map_err(|error| error.to_string())?;
+    let path = cache_dir.join(format!("track-{id}.json"));
+    let temporary = cache_dir.join(format!("track-{id}.json.tmp"));
+    tokio::fs::write(&temporary, json).await.map_err(|error| error.to_string())?;
+    tokio::fs::rename(&temporary, &path).await.map_err(|error| error.to_string())
+}
+
 const SEARCH_JS: &str = r#"
 (async () => {
     const query = QUERY_PLACEHOLDER;
     const r = await Spicetify.GraphQL.Request(Spicetify.GraphQL.Definitions.searchSuggestions, { query, limit: 20 });
     const items = r?.data?.searchV2?.topResultsV2?.itemsV2 ?? [];
     const tracks = items.filter(i => i.item?.__typename === "TrackResponseWrapper").map(i => i.item.data);
-    return JSON.stringify(tracks.map(t => ({
+    return JSON.stringify(tracks.filter(t => !t.uri?.startsWith("spotify:local:")).map(t => ({
         uri: t.uri,
         name: t.name ?? null,
         album: t.albumOfTrack ? { uri: t.albumOfTrack.uri ?? null, name: t.albumOfTrack.name ?? null,
@@ -582,6 +612,9 @@ pub(crate) fn add_playlist(catalog: &mut Catalog, raw: &Value) {
 
 fn add_track(catalog: &mut Catalog, raw: &Value) -> Option<Uuid> {
     let uri = str_field(raw, "uri")?;
+    if uri.starts_with("spotify:local:") {
+        return None;
+    }
     let id = catalog::stable_id(uri);
     if catalog.tracks.contains_key(&id) {
         return Some(id);
@@ -700,7 +733,7 @@ const DUMP_PLAYLIST_JS: &str = r#"
         uri,
         name: p.metadata?.name ?? null,
         image: (p.metadata?.images && p.metadata.images[0]?.url) || null,
-        tracks: items.filter(t => t.type === "track").map(t => ({
+        tracks: items.filter(t => t.type === "track" && !t.uri?.startsWith("spotify:local:")).map(t => ({
             uid: t.uid ?? null,
             uri: t.uri,
             name: t.name ?? null,
