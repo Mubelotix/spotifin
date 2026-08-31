@@ -33,6 +33,8 @@ fn audio_stream(
     path: Arc<PathBuf>,
     session: Option<player::CaptureSession>,
     window: Option<(u64, u64, u64)>,
+    complete_file: bool,
+    partial: bool,
 ) -> AudioResponse {
     let (reader, mut writer) = tokio::io::duplex(64 * 1024);
     tokio::spawn(async move {
@@ -70,6 +72,9 @@ fn audio_stream(
             }
             match file.read(&mut buffer).await {
                 Ok(0) => {
+                    if complete_file {
+                        break;
+                    }
                     // Nothing new; if the file shrank the recorder was reset.
                     if let Ok(meta) = file.metadata().await {
                         if meta.len() < offset {
@@ -90,27 +95,17 @@ fn audio_stream(
         }
     });
 
-    if let Some((start, end, total)) = window {
-        AudioResponse(
-            Response::build()
-                .status(Status::PartialContent)
-                .header(ContentType::AAC)
-                .raw_header("Cache-Control", "no-store")
-                .raw_header("Accept-Ranges", "bytes")
-                .raw_header("Content-Range", format!("bytes {start}-{end}/{total}"))
-                .streamed_body(reader)
-                .finalize(),
-        )
-    } else {
-        AudioResponse(
-            Response::build()
-                .header(ContentType::AAC)
-                .raw_header("Cache-Control", "no-store")
-                .raw_header("Accept-Ranges", "bytes")
-                .streamed_body(reader)
-                .finalize(),
-        )
+    let mut builder = Response::build();
+    builder.header(ContentType::AAC);
+    builder.raw_header("Cache-Control", "no-store");
+    builder.raw_header("Accept-Ranges", "bytes");
+    if partial {
+        builder.status(Status::PartialContent);
+        if let Some((start, end, total)) = window {
+            builder.raw_header("Content-Range", format!("bytes {start}-{end}/{total}"));
+        }
     }
+    AudioResponse(builder.streamed_body(reader).finalize())
 }
 /// Parses single-range `bytes=a-b`, `bytes=a-` and `bytes=-b` headers against
 /// the canonical size `total`.
@@ -141,6 +136,19 @@ impl<'r> rocket::request::FromRequest<'r> for RangeHeader {
     }
 }
 
+/// A cached capture qualifies when its tail is at most a few seconds short of
+/// the track's expected size.
+async fn cached_capture(state: &State<crate::AppState>, id: uuid::Uuid) -> Option<(PathBuf, u64)> {
+    let duration_ms = state.catalog.read().unwrap().tracks.get(&id)?.duration_ms;
+    if duration_ms == 0 {
+        return None;
+    }
+    let expected_bytes = duration_ms / 1000 * 24_000;
+    let path = state.audio.cache.join(format!("{id}.aac"));
+    let len = tokio::fs::metadata(&path).await.ok()?.len();
+    (len + 6 * 24_000 >= expected_bytes).then_some((path, len))
+}
+
 async fn open_audio_stream(
     state: &State<crate::AppState>,
     item_id: &str,
@@ -149,22 +157,46 @@ async fn open_audio_stream(
     let Ok(id) = uuid::Uuid::parse_str(item_id) else {
         return Err(rocket::http::Status::NotFound);
     };
-    let known = state.catalog.read().unwrap().tracks.contains_key(&id);
-    if !known {
+    if !state.catalog.read().unwrap().tracks.contains_key(&id) {
         return Err(rocket::http::Status::NotFound);
     }
-    player::prepare(state.inner(), id, &state.audio.recording).await;
+    let explicit_range = range.0.is_some();
+    if let Some((path, len)) = cached_capture(state, id).await {
+        // Complete file on disk: no client interaction, serve the whole thing
+        // or any requested slice of it.
+        state.player.note_activity();
+        let window = range
+            .0
+            .and_then(|header| parse_range(&header, len))
+            .map(|(start, end)| (start, end, len))
+            .or(Some((0, len.saturating_sub(1), len)));
+        return Ok(audio_stream(
+            Arc::new(path),
+            None,
+            window,
+            true,
+            explicit_range,
+        ));
+    }
+    player::prepare(state, id, &state.audio.recording, &state.audio.cache).await;
 
     let session = state.player.session_for(id).await;
     let total = match &session {
         Some(capture) => capture.expected_bytes,
         None => tokio::fs::metadata(state.audio.recording.as_ref()).await.map(|m| m.len()).unwrap_or(0),
     };
+    let explicit_range = range.0.is_some();
     let window = range
         .0
         .and_then(|header| parse_range(&header, total))
         .map(|(start, end)| (start, end, total));
-    Ok(audio_stream(state.audio.recording.clone(), session, window))
+    Ok(audio_stream(
+        state.audio.recording.clone(),
+        session,
+        window,
+        false,
+        explicit_range,
+    ))
 }
 
 /// All audio items stream the shared live recording; requesting a known item

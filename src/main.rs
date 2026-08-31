@@ -15,6 +15,7 @@ use rocket::routes;
 pub struct AudioPaths {
     recording: Arc<PathBuf>,
     hls: Arc<PathBuf>,
+    cache: Arc<PathBuf>,
 }
 
 pub struct AppState {
@@ -65,11 +66,13 @@ fn audio_and_jellyfin() -> Vec<rocket::Route> {
 async fn rocket() -> _ {
     let root = data_dir();
     let hls = root.join("hls");
+    let cache = root.join("cache");
     let recording = root.join("recording.aac");
     let state = AppState {
         audio: AudioPaths {
-            recording: Arc::new(recording.clone()),
+            recording: Arc::new(recording),
             hls: Arc::new(hls.clone()),
+            cache: Arc::new(cache.clone()),
         },
         catalog: Arc::default(),
         bridge: bridge::BridgeState::default(),
@@ -78,6 +81,9 @@ async fn rocket() -> _ {
 
     if let Err(error) = tokio::fs::create_dir_all(&hls).await {
         eprintln!("could not create hls directory: {error}");
+    }
+    if let Err(error) = tokio::fs::create_dir_all(&cache).await {
+        eprintln!("could not create cache directory: {error}");
     }
 
     tokio::spawn(refresh_loop(state.bridge.clone(), state.catalog.clone()));

@@ -51,7 +51,7 @@ impl PlayerControl {
         }
     }
 
-    fn note_activity(&self) {
+    pub fn note_activity(&self) {
         *self.inner.last_activity.lock().unwrap() = Some(Instant::now());
         *self.inner.idle_paused.lock().unwrap() = false;
     }
@@ -142,7 +142,12 @@ async fn wait_recorder_restarted(path: &std::path::Path, previous_len: u64) {
 /// Makes the shared recording correspond to `item_id`: plays the track in the
 /// client, resets the recorder and opens a capture session so audio responses
 /// end with the song. Unknown items stream whatever is playing.
-pub async fn prepare(state: &crate::AppState, item_id: uuid::Uuid, recording: &std::path::Path) {
+pub async fn prepare(
+    state: &crate::AppState,
+    item_id: uuid::Uuid,
+    recording: &std::path::Path,
+    cache_dir: &std::path::Path,
+) {
     state.player.note_activity();
     let (uri, duration_ms) = {
         let catalog = state.catalog.read().unwrap();
@@ -176,7 +181,55 @@ pub async fn prepare(state: &crate::AppState, item_id: uuid::Uuid, recording: &s
             *state.player.inner.session.lock().await =
                 Some(CaptureSession { item: item_id, min_end, expected_bytes });
             *last = Some(item_id);
+            // Park the finished capture in the cache once the song is over.
+            tokio::spawn(save_to_cache(
+                recording.to_path_buf(),
+                cache_dir.to_path_buf(),
+                item_id,
+                min_end,
+                expected_bytes,
+            ));
         }
         Err(error) => eprintln!("could not play {uri}: {error}"),
+    }
+}
+
+/// A few seconds of tail may be chopped off by the recorder's flush buffer;
+/// more than that and the capture is not worth keeping.
+const CACHE_TAIL_TOLERANCE_BYTES: u64 = 6 * 24_000;
+
+async fn save_to_cache(
+    recording: std::path::PathBuf,
+    cache_dir: std::path::PathBuf,
+    item_id: uuid::Uuid,
+    ready_at: Instant,
+    expected_bytes: u64,
+) {
+    while Instant::now() < ready_at {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    // ffmpeg flushes in bursts; the tail of this song often only leaves its
+    // buffer once following audio pushes it out (or not at all if nothing
+    // follows). Wait for completeness, then give up gracefully.
+    let deadline = ready_at + Duration::from_secs(45);
+    loop {
+        let len = tokio::fs::metadata(&recording).await.map(|m| m.len()).unwrap_or(0);
+        if len >= expected_bytes || Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+    let Ok(raw) = tokio::fs::read(&recording).await else {
+        return;
+    };
+    let take = (raw.len() as u64).min(expected_bytes) as usize;
+    if expected_bytes.saturating_sub(take as u64) > CACHE_TAIL_TOLERANCE_BYTES {
+        eprintln!("capture of {item_id} incomplete ({} of {expected_bytes} bytes), not cached", raw.len());
+        return;
+    }
+    let tmp = cache_dir.join(format!("tmp-{item_id}.aac"));
+    let final_path = cache_dir.join(format!("{item_id}.aac"));
+    if tokio::fs::write(&tmp, &raw[..take]).await.is_ok() {
+        let _ = tokio::fs::rename(&tmp, &final_path).await;
     }
 }
