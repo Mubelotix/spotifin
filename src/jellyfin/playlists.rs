@@ -10,6 +10,22 @@ use crate::jellyfin::dto::{base_item, QueryResult};
 use crate::spotify;
 use crate::AppState;
 
+#[get("/Playlists?<query..>")]
+pub fn playlists(query: PageQuery, state: &State<AppState>) -> Json<QueryResult<crate::jellyfin::dto::BaseItemDto>> {
+    let catalog = state.catalog.read().unwrap();
+    let mut items: Vec<_> = catalog.playlists.values().map(crate::catalog::Item::Playlist).collect();
+    items.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
+    let total = items.len();
+    let start = query.start_index.unwrap_or(0);
+    let items = items
+        .into_iter()
+        .skip(start)
+        .take(query.limit.unwrap_or(usize::MAX))
+        .map(|item| crate::jellyfin::dto::base_item(&catalog, &item, None))
+        .collect();
+    Json(QueryResult { items, total_record_count: total, start_index: start })
+}
+
 #[get("/Playlists/<playlist_id>")]
 pub fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<Json<Value>> {
     let catalog = state.catalog.read().unwrap();

@@ -19,6 +19,10 @@ pub struct ItemQuery {
     search_term: Option<String>,
     #[field(name = "Filters")]
     filters: Option<String>,
+    #[field(name = "ArtistIds")]
+    artist_ids: Option<String>,
+    #[field(name = "AlbumArtistIds")]
+    album_artist_ids: Option<String>,
     #[field(name = "StartIndex")]
     start_index: Option<usize>,
     #[field(name = "Limit")]
@@ -52,19 +56,56 @@ fn page<T>(items: Vec<T>, start: usize, limit: Option<usize>) -> (Vec<T>, usize)
     (sliced, total)
 }
 
+fn parse_ids(raw: Option<&str>) -> Vec<Uuid> {
+    raw.unwrap_or_default()
+        .split(',')
+        .filter_map(|id| Uuid::parse_str(id.trim()).ok())
+        .collect()
+}
+
 async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDto> {
     let types = parse_types(query.include_item_types.clone());
     let parent = query.parent_id.as_deref().and_then(|raw| Uuid::parse_str(raw).ok());
     let search = query.search_term.as_deref().unwrap_or_default();
+    let mut artist_ids = parse_ids(query.artist_ids.as_deref());
+    let album_artist_ids = parse_ids(query.album_artist_ids.as_deref());
+    if let Some(id) = parent {
+        let is_artist = state.catalog.read().unwrap().artists.contains_key(&id);
+        if is_artist && !artist_ids.contains(&id) {
+            artist_ids.push(id);
+        }
+    }
+    let mut fetch_artist_ids = artist_ids.clone();
+    for id in &album_artist_ids {
+        if !fetch_artist_ids.contains(id) {
+            fetch_artist_ids.push(*id);
+        }
+    }
     let favorites_only = query
         .filters
         .as_deref()
         .map(|filters| filters.split(',').any(|filter| filter.trim().eq_ignore_ascii_case("IsFavorite")))
         .unwrap_or(false);
 
-    // Remote results are ingested before the local pass so they participate
-    // in filtering, sorting and pagination exactly like library items.
-    if !search.is_empty() && parent.is_none() {
+    // Fetch an artist's complete discography before filtering, so artist pages
+    // are not limited to saved albums or tracks previously seen by the server.
+    for artist_id in &fetch_artist_ids {
+        let uri = state.catalog.read().unwrap().artists.get(artist_id).map(|artist| artist.uri.clone());
+        if let Some(uri) = uri {
+            match crate::spotify::artist_tracks(&state.bridge, &uri).await {
+                Ok(results) => {
+                    let mut catalog = state.catalog.write().unwrap();
+                    for track in &results {
+                        crate::spotify::ingest_track(&mut catalog, track);
+                    }
+                }
+                Err(error) => eprintln!("artist fetch failed for {uri}: {error}"),
+            }
+        }
+    }
+
+    // Remote search results are ingested before the local pass as well.
+    if !search.is_empty() && parent.is_none() && artist_ids.is_empty() {
         match crate::spotify::search(&state.bridge, search).await {
             Ok(results) => {
                 eprintln!("remote search {:?} -> {} results", search, results.len());
@@ -79,7 +120,7 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
 
     let catalog = state.catalog.read().unwrap();
     let term = if search.is_empty() { None } else { Some(search) };
-    let found = catalog.query(&types, parent, term, favorites_only);
+    let found = catalog.query(&types, parent, term, favorites_only, &artist_ids, &album_artist_ids);
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
     let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();
@@ -128,7 +169,7 @@ type MaybeItem = Result<Json<BaseItemDto>, Status>;
 async fn artist_index(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
     let catalog = state.catalog.read().unwrap();
     let term = query.search_term.as_deref().filter(|term| !term.is_empty());
-    let found = catalog.query(&["MusicArtist"], None, term, false);
+    let found = catalog.query(&["MusicArtist"], None, term, false, &[], &[]);
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
     let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();

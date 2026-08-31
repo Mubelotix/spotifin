@@ -31,6 +31,7 @@ pub fn routes() -> Vec<Route> {
         items::music_genres,
         items::search_hints,
         items::instant_mix,
+        playlists::playlists,
         playlists::get_playlist,
         playlists::playlist_items,
         playlists::create_playlist,

@@ -34,9 +34,11 @@ COPY bridge.js /opt/spicetify/Extensions/bridge.js
 # then launch Spotify inside a D-Bus session (no session bus = 100% CPU busy loop)
 RUN printf '%s\n' \
         '#!/bin/bash' \
-        'if mkdir /tmp/spotify-backend.lock 2>/dev/null; then ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server >> /tmp/backend-live.log 2>&1 & fi' \
+        'exec 9>/tmp/spotify-autostart.lock' \
+        'if ! flock -n 9; then exit 0; fi' \
+        'exec 8>/tmp/spotify-backend.lock' \
+        'if flock -n 8; then ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server >> /tmp/backend-live.log 2>&1 & fi' \
         'for _ in {1..10}; do if pgrep -u abc -x spotify >/dev/null 2>&1; then exit 0; fi; sleep 1; done' \
-        'if ! mkdir /tmp/spotify-autostart.lock 2>/dev/null; then exit 0; fi' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
         'exec dbus-launch --exit-with-session spotify --no-sandbox --disable-dev-shm-usage' \

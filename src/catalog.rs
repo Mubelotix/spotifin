@@ -14,6 +14,7 @@ pub fn stable_id(key: &str) -> Uuid {
 #[derive(Clone)]
 pub struct Artist {
     pub id: Uuid,
+    pub uri: String,
     pub name: String,
 }
 
@@ -253,9 +254,17 @@ impl Catalog {
     }
 
     /// Direct children of `parent`; with the whole catalog when recursive.
-    pub fn query(&self, types: &[&str], parent: Option<Uuid>, search: Option<&str>, favorites_only: bool) -> Vec<Item<'_>> {
+    pub fn query(
+        &self,
+        types: &[&str],
+        parent: Option<Uuid>,
+        search: Option<&str>,
+        favorites_only: bool,
+        artist_ids: &[Uuid],
+        album_artist_ids: &[Uuid],
+    ) -> Vec<Item<'_>> {
         let mut items = self.candidate_items(parent);
-        items.retain(|item| self.matches(item, types, parent, search, favorites_only));
+        items.retain(|item| self.matches(item, types, parent, search, favorites_only, artist_ids, album_artist_ids));
         items.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
         items
     }
@@ -265,8 +274,19 @@ impl Catalog {
             Some(id) if id != library_id() => match self.item(id) {
                 Some(Item::Album(_)) => self.track_children(|t| t.album_id == Some(id)),
                 Some(Item::Artist(_)) => {
-                    let albums = self.albums.values().filter(|a| a.artist_ids.contains(&id));
-                    albums.map(Item::Album).collect()
+                    let mut items: Vec<Item<'_>> = self
+                        .albums
+                        .values()
+                        .filter(|a| a.artist_ids.contains(&id))
+                        .map(Item::Album)
+                        .collect();
+                    items.extend(
+                        self.tracks
+                            .values()
+                            .filter(|t| t.artist_ids.contains(&id))
+                            .map(Item::Track),
+                    );
+                    items
                 }
                 Some(Item::Playlist(playlist)) => self.playlist_tracks(playlist),
                 _ => vec![],
@@ -302,7 +322,16 @@ impl Catalog {
             .collect()
     }
 
-    fn matches(&self, item: &Item<'_>, types: &[&str], parent: Option<Uuid>, search: Option<&str>, favorites_only: bool) -> bool {
+    fn matches(
+        &self,
+        item: &Item<'_>,
+        types: &[&str],
+        parent: Option<Uuid>,
+        search: Option<&str>,
+        favorites_only: bool,
+        artist_ids: &[Uuid],
+        album_artist_ids: &[Uuid],
+    ) -> bool {
         if matches!(item, Item::Library(_)) && parent.is_some() {
             return false;
         }
@@ -312,19 +341,47 @@ impl Catalog {
         // Derived albums/artists exist to decorate tracks; only the ones the
         // user explicitly saved or followed are part of the library.
         let listed = match item {
-            Item::Album(album) => self.saved_albums.contains(&album.id),
+            Item::Album(album) => {
+                self.saved_albums.contains(&album.id) || !artist_ids.is_empty() || !album_artist_ids.is_empty()
+            }
             Item::Artist(artist) => self.followed_artists.contains(&artist.id),
             _ => true,
         };
         if !listed {
             return false;
         }
-        if favorites_only && !self.is_favorite(item.id()) {
+        let artist_scoped = !artist_ids.is_empty() || !album_artist_ids.is_empty();
+        if favorites_only && !artist_scoped && matches!(item, Item::Track(_) | Item::Album(_)) && !self.is_favorite(item.id()) {
+            return false;
+        }
+        if !artist_ids.is_empty() && !self.has_artist(item, artist_ids) {
+            return false;
+        }
+        if !album_artist_ids.is_empty() && !self.has_album_artist(item, album_artist_ids) {
             return false;
         }
         match search {
             Some(term) => self.searchable_text(item).contains_all_words(term),
             None => true,
+        }
+    }
+
+    fn has_artist(&self, item: &Item<'_>, artist_ids: &[Uuid]) -> bool {
+        match item {
+            Item::Track(track) => track.artist_ids.iter().any(|id| artist_ids.contains(id)),
+            Item::Album(album) => album.artist_ids.iter().any(|id| artist_ids.contains(id)),
+            _ => false,
+        }
+    }
+
+    fn has_album_artist(&self, item: &Item<'_>, artist_ids: &[Uuid]) -> bool {
+        match item {
+            Item::Track(track) => track
+                .album_id
+                .and_then(|id| self.albums.get(&id))
+                .is_some_and(|album| album.artist_ids.iter().any(|id| artist_ids.contains(id))),
+            Item::Album(album) => album.artist_ids.iter().any(|id| artist_ids.contains(id)),
+            _ => false,
         }
     }
 
