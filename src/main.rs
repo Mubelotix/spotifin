@@ -85,7 +85,7 @@ async fn rocket() -> _ {
         std::env::var("PLAYBACK_IDLE_TIMEOUT_SECS")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(300),
+            .unwrap_or(600),
     );
     tokio::spawn(player::PlayerControl::idle_watchdog(state.bridge.clone(), state.player.clone(), idle_timeout));
 
