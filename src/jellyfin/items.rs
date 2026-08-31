@@ -332,26 +332,51 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
         let catalog = state.catalog.read().unwrap();
         match catalog.item(item_id) {
             Some(crate::catalog::Item::Track(track)) => Some(track.uri.clone()),
+            Some(crate::catalog::Item::Album(album)) => catalog
+                .tracks
+                .values()
+                .filter(|track| track.album_id == Some(album.id))
+                .min_by_key(|track| (track.disc, track.index))
+                .map(|track| track.uri.clone()),
             _ => None,
         }
     };
-    // InstantMix is metadata requested by the client, not a playback command.
-    // Never seed Spotify's station queue here: doing so starts unrelated music
-    // and lets Spotify advance outside the Jellyfin queue.
-    let catalog = state.catalog.read().unwrap();
-    let seed_id = seed_uri.as_deref().map(crate::catalog::stable_id);
-    let mut tracks = seed_id
-        .and_then(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
-        .into_iter()
-        .collect::<Vec<_>>();
-    if limit > tracks.len() {
-        tracks.extend(
-            catalog
-                .random_tracks(limit - tracks.len())
-                .into_iter()
-                .filter(|track| Some(track.id()) != seed_id),
-        );
+    // Seed Spotify so its recommendation engine owns the mix and provides the
+    // ordered next tracks through the renderer's player state.
+    let autoplay = crate::spotify::autoplay_tracks(&state.bridge, seed_uri.as_deref())
+        .await
+        .unwrap_or_default();
+
+    if !autoplay.is_empty() {
+        let mut catalog = state.catalog.write().unwrap();
+        for track in autoplay.iter().take(limit) {
+            crate::spotify::ingest_track(&mut catalog, track);
+        }
     }
+
+    let catalog = state.catalog.read().unwrap();
+    let tracks: Vec<_> = if autoplay.is_empty() {
+        seed_uri
+            .as_deref()
+            .map(crate::catalog::stable_id)
+            .and_then(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
+            .into_iter()
+            .collect()
+    } else {
+        let mut ids = autoplay
+            .iter()
+            .take(limit)
+            .filter_map(|raw| raw.get("uri").and_then(Value::as_str))
+            .map(crate::catalog::stable_id)
+            .collect::<Vec<_>>();
+        if let Some(seed_uri) = seed_uri.as_deref() {
+            ids.insert(0, crate::catalog::stable_id(seed_uri));
+            ids.truncate(limit);
+        }
+        ids.into_iter()
+            .filter_map(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
+            .collect()
+    };
     let dtos = tracks.iter().map(|track| base_item(&catalog, track, None)).collect();
     Json(QueryResult { items: dtos, total_record_count: tracks.len(), start_index: 0 })
 }
