@@ -302,6 +302,11 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
     Json(QueryResult { items: dtos, total_record_count: tracks.len(), start_index: 0 })
 }
 
+#[get("/Items/<item_id>/Similar?<query..>")]
+pub async fn similar(item_id: Uuid, query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+    instant_mix(item_id, query, state).await
+}
+
 /// None of the client-facing data sources expose genres, so both families
 /// answer with an empty result rather than 404.
 fn empty_result() -> Json<QueryResult<BaseItemDto>> {

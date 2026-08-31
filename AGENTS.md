@@ -47,6 +47,11 @@ inside the running container without restarting Spotify:
 ./dev-backend.sh --release  # release build
 ```
 
+After every substantial backend change, run `./dev-backend.sh` by default to
+replace the running backend and validate the change in the live container.
+This does not restart Spotify; do not wait for an explicit request to deploy
+the new backend.
+
 The complete image remains the release workflow; `.containerignore` excludes
 the persistent Spotify data and local build artifacts from its build context.
 
