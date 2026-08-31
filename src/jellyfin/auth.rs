@@ -20,8 +20,9 @@ pub struct UserDto {
     pub id: Uuid,
     pub name: String,
     pub server_id: Option<String>,
-    pub has_password: Option<bool>,
-    pub primary_image_tag: Option<String>,
+    pub has_password: bool,
+    pub has_configured_password: bool,
+    pub has_configured_easy_password: bool,
 }
 
 #[derive(Serialize)]
@@ -37,8 +38,9 @@ fn dto() -> UserDto {
         id: user_id(),
         name: USER_NAME.to_string(),
         server_id: Some(user_id().to_string()),
-        has_password: Some(false),
-        primary_image_tag: None,
+        has_password: false,
+        has_configured_password: false,
+        has_configured_easy_password: false,
     }
 }
 
@@ -70,4 +72,16 @@ pub fn get_me() -> Json<UserDto> {
 #[post("/Sessions/Logout")]
 pub fn logout() -> Status {
     Status::NoContent
+}
+
+/// Probed by clients during server setup.
+#[get("/System/Info/Public")]
+pub fn public_system_info() -> Json<Value> {
+    Json(serde_json::json!({
+        "Id": user_id(),
+        "ServerName": "spotify-mcp",
+        "ProductName": "Jellyfin Server",
+        "Version": "10.8.13",
+        "OperatingSystem": "Linux",
+    }))
 }

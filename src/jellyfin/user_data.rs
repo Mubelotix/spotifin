@@ -81,3 +81,18 @@ fn report(user_id: Uuid, _item_id: Uuid, state: &State<AppState>) -> Status {
 fn check_user(user_id: Uuid) -> Option<()> {
     (user_id == crate::jellyfin::auth::user_id()).then_some(())
 }
+
+/// Modern user-context variants of the legacy /Users/{userId}/... routes.
+#[get("/UserItems/<item_id>/UserData")]
+pub fn get_user_data_modern(item_id: Uuid, state: &State<AppState>) -> Option<Json<UserItemData>> {
+    get_user_data(crate::jellyfin::auth::user_id(), item_id, state)
+}
+
+#[post("/UserItems/<item_id>/UserData", data = "<body>")]
+pub fn post_user_data_modern(
+    item_id: Uuid,
+    body: Json<serde_json::Value>,
+    state: &State<AppState>,
+) -> Json<UserItemData> {
+    post_user_data(crate::jellyfin::auth::user_id(), item_id, body, state)
+}

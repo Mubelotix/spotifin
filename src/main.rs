@@ -40,12 +40,34 @@ fn health() -> rocket::http::Status {
 /// every REFRESH_INTERVAL. A failed refresh just waits for the next tick.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
+/// Right after a container boot the client answers with half-empty views;
+/// a collection much smaller than the previous one is rejected and retried
+/// quickly instead of replacing a good catalog.
+const SUSPECT_SHRINK_FACTOR: usize = 4;
+const SUSPECT_MAX_TRIES: u32 = 5;
+
 async fn refresh_loop(bridge: bridge::BridgeState, catalog: std::sync::Arc<std::sync::RwLock<catalog::Catalog>>) {
+    let mut known_tracks = 0usize;
+    let mut suspect_streak = 0u32;
     loop {
         match spotify::collect(&bridge).await {
             Ok(fresh) => {
+                let size = fresh.tracks.len();
+                let suspect =
+                    known_tracks > 0 && size * SUSPECT_SHRINK_FACTOR < known_tracks
+                        && suspect_streak < SUSPECT_MAX_TRIES;
+                if suspect {
+                    suspect_streak += 1;
+                    eprintln!(
+                        "catalog looks partial ({size} tracks, had {known_tracks}), retrying"
+                    );
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    continue;
+                }
+                suspect_streak = 0;
+                known_tracks = size;
                 catalog.write().unwrap().merge(fresh);
-                eprintln!("catalog refreshed");
+                eprintln!("catalog refreshed: {size} tracks");
                 tokio::time::sleep(REFRESH_INTERVAL).await;
             }
             Err(error) => {

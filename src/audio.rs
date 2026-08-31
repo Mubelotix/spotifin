@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use rocket::fs::NamedFile;
 use rocket::http::{ContentType, Status};
-use rocket::request::Outcome;
+use rocket::request::{Outcome, Request};
 use rocket::response::{Responder, Response};
-use rocket::{get, routes, Route, State, Request};
+use rocket::{get, routes, Route, State};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     time::sleep,
@@ -15,7 +15,22 @@ use tokio::{
 use crate::player;
 
 pub fn routes() -> Vec<Route> {
-    routes![universal, file_alias, stream_alias, playlist, segment, relative_segment]
+    routes![
+            universal,
+            file_alias,
+            stream_alias,
+            stream_mp3,
+            stream_aac,
+            stream_m4a,
+            stream_flac,
+            stream_ogg,
+            stream_wav,
+            stream_opus,
+            playlist,
+            master_playlist,
+            segment,
+            relative_segment
+        ]
 }
 
 pub struct AudioResponse(Response<'static>);
@@ -214,6 +229,56 @@ pub async fn file_alias(state: &State<crate::AppState>, item_id: &str, range: Ra
 #[get("/Audio/<item_id>/stream")]
 pub async fn stream_alias(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
     open_audio_stream(state, item_id, range).await
+}
+
+/// TARGET.md documents the container-suffixed direct-play route; Rocket
+/// cannot parameterize mid-segment, so common containers get literal routes.
+async fn stream_container(
+    state: &State<crate::AppState>,
+    item_id: &str,
+    range: RangeHeader,
+) -> Result<AudioResponse, rocket::http::Status> {
+    open_audio_stream(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/stream.mp3", rank = 1)]
+pub async fn stream_mp3(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    stream_container(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/stream.aac", rank = 1)]
+pub async fn stream_aac(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    stream_container(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/stream.m4a", rank = 1)]
+pub async fn stream_m4a(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    stream_container(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/stream.flac", rank = 1)]
+pub async fn stream_flac(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    stream_container(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/stream.ogg", rank = 1)]
+pub async fn stream_ogg(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    stream_container(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/stream.wav", rank = 1)]
+pub async fn stream_wav(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    stream_container(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/stream.opus", rank = 1)]
+pub async fn stream_opus(state: &State<crate::AppState>, item_id: &str, range: RangeHeader) -> Result<AudioResponse, rocket::http::Status> {
+    stream_container(state, item_id, range).await
+}
+
+#[get("/Audio/<item_id>/master.m3u8")]
+pub async fn master_playlist(state: &State<crate::AppState>, item_id: &str) -> Option<(ContentType, NamedFile)> {
+    playlist(state, item_id).await
 }
 
 #[get("/Audio/<item_id>/main.m3u8")]

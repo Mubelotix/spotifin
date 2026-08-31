@@ -1,4 +1,5 @@
 use rocket::http::Status;
+use serde_json::Value;
 use rocket::serde::json::Json;
 use rocket::FromForm;
 use rocket::{get, State};
@@ -180,4 +181,14 @@ pub fn genres() -> Json<QueryResult<BaseItemDto>> {
 #[get("/MusicGenres")]
 pub fn music_genres() -> Json<QueryResult<BaseItemDto>> {
     empty_result()
+}
+
+/// Optional per TARGET.md; a few clients use it for type-as-you-search.
+#[get("/Search/Hints?<query..>")]
+pub async fn search_hints(query: ItemQuery, state: &State<AppState>) -> Json<Value> {
+    let result = run_query(state, query).await;
+    Json(serde_json::json!({
+        "SearchHints": result.items,
+        "TotalRecordCount": result.total_record_count,
+    }))
 }

@@ -14,6 +14,7 @@ use rocket::Route;
 pub fn routes() -> Vec<Route> {
     rocket::routes![
         auth::authenticate,
+        auth::public_system_info,
         auth::public_users,
         auth::get_user,
         auth::get_me,
@@ -28,6 +29,7 @@ pub fn routes() -> Vec<Route> {
         items::all_artists,
         items::genres,
         items::music_genres,
+        items::search_hints,
         items::instant_mix,
         playlists::get_playlist,
         playlists::playlist_items,
@@ -39,6 +41,8 @@ pub fn routes() -> Vec<Route> {
         images::image_index,
         user_data::get_user_data,
         user_data::post_user_data,
+        user_data::get_user_data_modern,
+        user_data::post_user_data_modern,
         user_data::mark_favorite,
         user_data::unmark_favorite,
         user_data::mark_played,
