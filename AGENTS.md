@@ -50,3 +50,25 @@ Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/sp
 ## Jellyfin API
 
 `TARGET.md` documents the Jellyfin music API required for a compatible reimplementation. It is based on the Jellyfin server, Finamp, and jellyfin-audio-player sources cloned under `/tmp/target-research/`.
+
+## Implementation decisions
+
+- Ignore authentication. Spotify is assumed to already be connected.
+- The instance has exactly one static user.
+- Keep Spotify API queries to a minimum. Prefer clicking in the Spotify application and reading the resulting visual state, as this should be less detectable as bot activity. Make exceptions only when necessary.
+- Playback progress is not important for now. Jellyfin progress may always be reported as zero; do not manage Spotify's playback cursor for this purpose.
+- Spotify Daily playlists and all Spotify playlists visible on the Spotify home page should be available to Jellyfin clients. Prefer representing them as classic playlists if Instant Mix cannot provide multiple separate mixes.
+- Lyrics are available through Spotify's interface using the microphone button.
+- Audio is known to stream through the Selkies interface when Spotify is playing inside the container. The audio recording/streaming location is undecided: it may be in the Spicetify extension, in the Rust backend, or outside the container, and may use the Selkies API itself.
+- A Rust backend is acceptable and will open the HTTP port, answer HTTP requests, and communicate with the Spicetify extension through a WebSocket.
+
+## Hard-won container lessons
+
+- `/defaults` MUST end up owned by `abc`. `init-adduser` does `lsiown abc:abc /defaults`, but a boot race can leave it root-owned (`700 root root`). When `abc` cannot traverse `/defaults`, PulseAudio fails to start ("Failed to create secure directory (/defaults)") and every Pulse client breaks (Selkies audio, Spotify sound). The init script runs a detached watchdog loop that re-runs `lsiown -R abc:abc /defaults` until the owner is right.
+- s6 kills background processes spawned from `custom-cont-init.d/*.sh` when the init phase ends, even with `&`. Long-lived helpers started there must be detached with `setsid nohup sh -c '...' >/dev/null 2>&1 &`.
+- LSIO copies `/defaults/autostart` to `/config/.config/openbox/autostart` only on FIRST boot; the persistent volume keeps a stale copy forever. The init script re-syncs it (`cat /defaults/autostart > ...`) on every boot.
+- The audio recorders are plain `ffmpeg -f pulse -i default` processes spawned by the init script (as root), waiting for `/defaults/native` to appear first, retrying forever if they die. Two independent processes: one `-f adts` into `/config/audio/recording.aac`, one `-f hls` (event playlist, 6s segments) into `/config/audio/hls/`. Do NOT use the ffmpeg `tee` muxer to combine them: the adts branch stays at 0 bytes while HLS writes.
+- ffmpeg buffers regular-file output (~256 KB): `recording.aac` grows in bursts while HLS segments appear in real time. `/universal` streams from the file tail, so expect bursty delivery.
+- Iterating on the container does NOT require a rebuild: `podman exec` to patch scripts/processes in the running container, and persist logs/state under `/config` so they survive restarts. Rebuild only once a change is validated.
+- The Rust backend binary is `spotify-server` (renamed from spotify-mcp). Its build is deliberately the LAST stage of the Containerfile so app changes don't invalidate the Spotify/Spicetify layers.
+- Debian trixie ships rustc 1.85; the `time` crate must be pinned (`cargo update -p time --precise 0.3.36`) or `cargo build --locked` fails inside the image.

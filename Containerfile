@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libayatana-appindicator3-1 \
         libgl1 \
         pulseaudio-utils \
+        ffmpeg \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ARG SPICETIFY_VERSION=2.44.0
@@ -31,6 +32,7 @@ RUN printf '%s\n' \
         '#!/bin/bash' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
+        'ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server &' \
         'exec dbus-launch --exit-with-session spotify --no-sandbox --disable-dev-shm-usage' \
         > /defaults/autostart \
     && chmod +x /defaults/autostart
@@ -47,10 +49,16 @@ RUN mkdir -p /custom-cont-init.d \
         'SPICETIFY_HOME=/config' \
         'SPICETIFY_CONFIG=/config/spicetify' \
         'CFG="$SPICETIFY_CONFIG/config-xpui.ini"' \
+        'setsid nohup sh -c "while true; do u=\$(stat -c %u /defaults 2>/dev/null); echo \"\$(date +%T) \$u\" >> /config/owner-boot.log; if [ \"\$u\" != \"\$(id -u abc)\" ]; then echo \"\$(date +%T) FIXING\" >> /config/owner-boot.log; lsiown -R abc:abc /defaults >> /config/owner-boot.log 2>&1 || true; fi; sleep 1; done" >/dev/null 2>&1 &' \
         'chown -R abc:abc /config/.cache /config/.config "$SPICETIFY_CONFIG" 2>/dev/null || true' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
-        'mkdir -p /config/.config/spotify "$SPICETIFY_CONFIG/Extensions"' \
+        'mkdir -p /config/.config/spotify "$SPICETIFY_CONFIG/Extensions" /config/.config/openbox' \
+        'cat /defaults/autostart > /config/.config/openbox/autostart' \
+        'chown abc:abc /config/.config/openbox/autostart' \
+        'mkdir -p /config/audio/hls' \
+        'setsid nohup sh -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f adts /config/audio/recording.aac; sleep 2; done" >/dev/null 2>&1 &' \
+        'setsid nohup sh -c "until [ -S /defaults/native ]; do sleep 1; done; while true; do ffmpeg -hide_banner -loglevel error -y -f pulse -i default -map 0:a -ac 2 -ar 44100 -c:a aac -b:a 192k -f hls -hls_time 6 -hls_list_size 0 -hls_playlist_type event -hls_segment_filename /config/audio/hls/segment-%06d.ts /config/audio/hls/main.m3u8; sleep 2; done" >/dev/null 2>&1 &' \
         '[ -f /config/.config/spotify/prefs ] || touch /config/.config/spotify/prefs' \
         'chmod -R a+rwX /usr/share/spotify' \
         'if [ ! -f "$CFG" ]; then' \
@@ -81,3 +89,17 @@ RUN mkdir -p /custom-cont-init.d \
         'fi' \
         > /custom-cont-init.d/50-spicetify-init.sh \
     && chmod +x /custom-cont-init.d/50-spicetify-init.sh
+
+# Build the backend last so changes to the application do not invalidate the
+# earlier Spotify and Spicetify setup layers.
+WORKDIR /opt/spotify-mcp
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cargo rustc build-essential pkg-config \
+    && cargo build --release --locked \
+    && install -m 0755 target/release/spotify-server /usr/local/bin/spotify-server \
+    && apt-get purge -y cargo rustc build-essential pkg-config \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /usr/local/cargo/registry /usr/local/cargo/git /opt/spotify-mcp
