@@ -208,7 +208,12 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
 }
 
 fn fill_album(catalog: &Catalog, dto: &mut BaseItemDto, album: &crate::catalog::Album) {
-    let count = catalog.tracks.values().filter(|t| t.album_id == Some(album.id)).count();
+    let tracks: Vec<_> = catalog.tracks.values().filter(|t| t.album_id == Some(album.id)).collect();
+    let (artists, artist_items) = artist_refs(catalog, &album.artist_ids);
+    dto.artists = Some(artists);
+    dto.artist_items = Some(artist_items);
+    dto.run_time_ticks = Some(tracks.iter().map(|track| track.duration_ms).sum::<u64>() * TICKS_PER_MS);
+    let count = tracks.len();
     dto.child_count = Some(count);
     dto.production_year = album.year;
     dto.image_tags = image_tag(&album.image);
