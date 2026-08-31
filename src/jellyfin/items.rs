@@ -139,10 +139,14 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
 
     let catalog = state.catalog.read().unwrap();
     let term = if search.is_empty() { None } else { Some(search) };
-    let mut found = catalog.query(&types, parent, term, favorites_only, &artist_ids, &album_artist_ids);
-    if !ids.is_empty() {
-        found.retain(|item| ids.contains(&item.id()));
-    }
+    let found = if ids.is_empty() {
+        catalog.query(&types, parent, term, favorites_only, &artist_ids, &album_artist_ids)
+    } else {
+        ids.iter()
+            .filter_map(|id| catalog.item(*id))
+            .filter(|item| types.is_empty() || types.contains(&item.jellyfin_type()))
+            .collect()
+    };
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
     let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();
