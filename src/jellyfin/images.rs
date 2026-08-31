@@ -22,11 +22,14 @@ fn image_url_of(state: &State<AppState>, item_id: Uuid) -> Option<String> {
 /// Spotify image references look like `spotify:image:<hex>`; the CDN URL is
 /// deterministic, so artwork is served as a redirect.
 fn cdn_url(image: &str) -> Option<String> {
-    let hex = image.strip_prefix("spotify:image:")?;
-    if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return None;
+    if let Some(hex) = image.strip_prefix("spotify:image:") {
+        if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        return Some(format!("https://i.scdn.co/image/{hex}"));
     }
-    Some(format!("https://i.scdn.co/image/{hex}"))
+    // Search results already come with full CDN URLs.
+    image.starts_with("https://").then(|| image.to_string())
 }
 
 #[get("/Items/<item_id>/Images/<image_type>")]

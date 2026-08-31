@@ -29,6 +29,8 @@ pub struct Album {
 #[derive(Clone)]
 pub struct Track {
     pub id: Uuid,
+    /// Source Spotify URI, used to drive playback through the client.
+    pub uri: String,
     pub name: String,
     pub album_id: Option<Uuid>,
     pub artist_ids: Vec<Uuid>,
@@ -102,6 +104,20 @@ pub fn library_id() -> Uuid {
     stable_id("library:music")
 }
 
+/// Jellyfin-style search: every whitespace-separated word must match somewhere
+/// in the track's name, album or artists ("darude sandstorm" finds "Sandstorm"
+/// by Darude).
+trait ContainsAllWords {
+    fn contains_all_words(&self, term: &str) -> bool;
+}
+
+impl ContainsAllWords for String {
+    fn contains_all_words(&self, term: &str) -> bool {
+        let haystack = self.as_str();
+        term.split_whitespace().all(|word| haystack.contains(&word.to_lowercase()))
+    }
+}
+
 pub const LIBRARY_NAME: &str = "Music";
 
 #[derive(Default)]
@@ -121,6 +137,24 @@ pub struct Catalog {
 impl Catalog {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Adopts the freshly collected catalog while preserving runtime state:
+    /// favorites, play counts, and dynamically ingested items (e.g. search
+    /// results) that the collector does not know about.
+    pub fn merge(&mut self, mut fresh: Catalog) {
+        fresh.favorites = std::mem::take(&mut self.favorites);
+        fresh.play_counts = std::mem::take(&mut self.play_counts);
+        for (id, track) in std::mem::take(&mut self.tracks) {
+            fresh.tracks.entry(id).or_insert(track);
+        }
+        for (id, album) in std::mem::take(&mut self.albums) {
+            fresh.albums.entry(id).or_insert(album);
+        }
+        for (id, artist) in std::mem::take(&mut self.artists) {
+            fresh.artists.entry(id).or_insert(artist);
+        }
+        *self = fresh;
     }
 
     pub fn item(&self, id: Uuid) -> Option<Item<'_>> {
@@ -222,12 +256,27 @@ impl Catalog {
         if !listed {
             return false;
         }
-        if let Some(term) = search {
-            if !item.name().to_lowercase().contains(&term.to_lowercase()) {
-                return false;
+        match search {
+            Some(term) => self.searchable_text(item).contains_all_words(term),
+            None => true,
+        }
+    }
+
+    fn searchable_text(&self, item: &Item<'_>) -> String {
+        let mut text = item.name().to_lowercase();
+        if let Item::Track(track) = item {
+            if let Some(album) = track.album_id.and_then(|id| self.albums.get(&id)) {
+                text.push(' ');
+                text.push_str(&album.name.to_lowercase());
+            }
+            for artist in &track.artist_ids {
+                if let Some(artist) = self.artists.get(artist) {
+                    text.push(' ');
+                    text.push_str(&artist.name.to_lowercase());
+                }
             }
         }
-        true
+        text
     }
 
     pub fn random_tracks(&self, count: usize) -> Vec<Item<'_>> {

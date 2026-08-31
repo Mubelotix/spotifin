@@ -4,7 +4,7 @@ use rocket::FromForm;
 use rocket::{get, State};
 use uuid::Uuid;
 
-use crate::catalog::{self, Catalog};
+use crate::catalog;
 use crate::jellyfin::dto::{base_item, BaseItemDto, QueryResult};
 use crate::AppState;
 
@@ -49,13 +49,32 @@ fn page<T>(items: Vec<T>, start: usize, limit: Option<usize>) -> (Vec<T>, usize)
     (sliced, total)
 }
 
-fn run_query(catalog: &Catalog, query: ItemQuery) -> QueryResult<BaseItemDto> {
-    let types = parse_types(query.include_item_types);
+async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDto> {
+    let types = parse_types(query.include_item_types.clone());
     let parent = query.parent_id.as_deref().and_then(|raw| Uuid::parse_str(raw).ok());
-    let found = catalog.query(&types, parent, query.search_term.as_deref());
+    let search = query.search_term.as_deref().unwrap_or_default();
+
+    // Remote results are ingested before the local pass so they participate
+    // in filtering, sorting and pagination exactly like library items.
+    if !search.is_empty() && parent.is_none() {
+        match crate::spotify::search(&state.bridge, search).await {
+            Ok(results) => {
+                eprintln!("remote search {:?} -> {} results", search, results.len());
+                let mut catalog = state.catalog.write().unwrap();
+                for track in &results {
+                    crate::spotify::ingest_track(&mut catalog, track);
+                }
+            }
+            Err(error) => eprintln!("remote search failed: {error}"),
+        }
+    }
+
+    let catalog = state.catalog.read().unwrap();
+    let term = if search.is_empty() { None } else { Some(search) };
+    let found = catalog.query(&types, parent, term);
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
-    let dtos = items.iter().map(|item| base_item(catalog, item, None)).collect();
+    let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();
     QueryResult { items: dtos, total_record_count: total, start_index: start }
 }
 
@@ -83,18 +102,16 @@ fn view_result(state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
 }
 
 #[get("/Users/<user_id>/Items?<query..>")]
-pub fn user_items(user_id: Uuid, query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+pub async fn user_items(user_id: Uuid, query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
     if user_id != crate::jellyfin::auth::user_id() {
         return Json(QueryResult { items: vec![], total_record_count: 0, start_index: 0 });
     }
-    let catalog = state.catalog.read().unwrap();
-    Json(run_query(&catalog, query))
+    Json(run_query(state.inner(), query).await)
 }
 
 #[get("/Items?<query..>", rank = 2)]
-pub fn items(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
-    let catalog = state.catalog.read().unwrap();
-    Json(run_query(&catalog, query))
+pub async fn items(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
+    Json(run_query(state.inner(), query).await)
 }
 
 type MaybeItem = Result<Json<BaseItemDto>, Status>;

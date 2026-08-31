@@ -1,7 +1,7 @@
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::bridge::eval_on_bridge;
+use crate::bridge::{eval_on_bridge, BridgeState};
 use crate::catalog::{self, Album, Artist, Catalog, Playlist, PlaylistEntry, Track};
 
 /// One eval per refresh: pull playlists (rootlist + liked songs), then saved
@@ -91,6 +91,46 @@ pub async fn collect(bridge: &crate::bridge::BridgeState) -> Result<Catalog, Str
     parse_catalog(&playlists)
 }
 
+const SEARCH_JS: &str = r#"
+(async () => {
+    const query = QUERY_PLACEHOLDER;
+    const r = await Spicetify.GraphQL.Request(Spicetify.GraphQL.Definitions.searchSuggestions, { query, limit: 20 });
+    const items = r?.data?.searchV2?.topResultsV2?.itemsV2 ?? [];
+    const tracks = items.filter(i => i.item?.__typename === "TrackResponseWrapper").map(i => i.item.data);
+    return JSON.stringify(tracks.map(t => ({
+        uri: t.uri,
+        name: t.name ?? null,
+        album: t.albumOfTrack ? { uri: t.albumOfTrack.uri ?? null, name: t.albumOfTrack.name ?? null,
+            image: (t.albumOfTrack.coverArt?.sources && t.albumOfTrack.coverArt.sources[0]?.url) || null } : null,
+        artists: ((t.artists?.items) || []).map(a => ({ uri: a.uri ?? null, name: a.profile?.name ?? a.name ?? null })),
+        ms: t.duration?.totalMilliseconds ?? t.duration?.milliseconds ?? null,
+        disc: 1,
+        num: 0
+    })));
+})()
+"#;
+
+/// Searches Spotify from the renderer and returns raw track entries ready
+/// for `ingest_track`.
+pub async fn search(bridge: &BridgeState, query: &str) -> Result<Vec<Value>, String> {
+    let literal = serde_json::to_string(query).map_err(|e| e.to_string())?;
+    let code = SEARCH_JS.replace("QUERY_PLACEHOLDER", &literal);
+    let response = eval_on_bridge(bridge, code)
+        .await
+        .map_err(|error| format!("search failed: {error}"))?;
+    let raw = response
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "search returned no value".to_string())?;
+    serde_json::from_str::<Vec<Value>>(raw).map_err(|error| format!("search JSON invalid: {error}"))
+}
+
+/// Inserts a raw track entry (collector or search shape) if new; either way
+/// returns the track's stable id.
+pub fn ingest_track(catalog: &mut Catalog, raw: &Value) -> Option<Uuid> {
+    add_track(catalog, raw)
+}
+
 fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
     let mut catalog = Catalog::new();
     for playlist in array_of(raw.get("playlists")) {
@@ -174,6 +214,7 @@ fn add_track(catalog: &mut Catalog, raw: &Value) -> Option<Uuid> {
     let album_id = raw.get("album").and_then(|album| add_album(catalog, album, &artist_ids));
     catalog.tracks.insert(id, Track {
         id,
+        uri: uri.to_string(),
         name: str_field(raw, "name").unwrap_or("Unknown track").to_string(),
         album_id,
         artist_ids,

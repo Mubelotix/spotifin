@@ -11,6 +11,8 @@ use tokio::{
     time::sleep,
 };
 
+use crate::player;
+
 pub fn routes() -> Vec<Route> {
     routes![universal, file_alias, stream_alias, playlist, segment, relative_segment]
 }
@@ -23,7 +25,9 @@ impl<'r> Responder<'r, 'static> for AudioResponse {
     }
 }
 
-fn audio_stream(path: Arc<PathBuf>) -> AudioResponse {
+/// Streams the recording from its live tail, restarting at offset zero when
+/// the recorder was reset (the file shrinks).
+fn audio_stream(path: Arc<PathBuf>, session: Option<player::CaptureSession>) -> AudioResponse {
     let (reader, mut writer) = tokio::io::duplex(64 * 1024);
     tokio::spawn(async move {
         let mut offset = 0u64;
@@ -37,9 +41,24 @@ fn audio_stream(path: Arc<PathBuf>) -> AudioResponse {
                 continue;
             }
 
+            if let Some(capture) = session {
+                let now = std::time::Instant::now();
+                if offset >= capture.expected_bytes && now >= capture.min_end {
+                    break;
+                }
+            }
+
             let mut buffer = vec![0; 32 * 1024];
             match file.read(&mut buffer).await {
-                Ok(0) => sleep(Duration::from_millis(250)).await,
+                Ok(0) => {
+                    // Nothing new; if the file shrank the recorder was reset.
+                    if let Ok(meta) = file.metadata().await {
+                        if meta.len() < offset {
+                            offset = 0;
+                        }
+                    }
+                    sleep(Duration::from_millis(250)).await
+                }
                 Ok(size) => {
                     buffer.truncate(size);
                     offset += size as u64;
@@ -61,24 +80,32 @@ fn audio_stream(path: Arc<PathBuf>) -> AudioResponse {
     )
 }
 
-/// All audio items stream the same live recording for now; the Jellyfin
-/// playback cursor is not managed.
+async fn open_audio_stream(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
+    let deadline = match uuid::Uuid::parse_str(item_id) {
+        Ok(id) => {
+            player::prepare(state.inner(), id, &state.audio.recording).await;
+            state.player.session_for(id).await
+        }
+        Err(_) => None,
+    };
+    audio_stream(state.audio.recording.clone(), deadline)
+}
+
+/// All audio items stream the shared live recording; requesting a known item
+/// switches the client to that track first.
 #[get("/Audio/<item_id>/universal")]
-pub fn universal(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
-    let _ = item_id;
-    audio_stream(state.audio.recording.clone())
+pub async fn universal(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
+    open_audio_stream(state, item_id).await
 }
 
 #[get("/Audio/<item_id>/File")]
-pub fn file_alias(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
-    let _ = item_id;
-    audio_stream(state.audio.recording.clone())
+pub async fn file_alias(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
+    open_audio_stream(state, item_id).await
 }
 
 #[get("/Audio/<item_id>/stream")]
-pub fn stream_alias(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
-    let _ = item_id;
-    audio_stream(state.audio.recording.clone())
+pub async fn stream_alias(state: &State<crate::AppState>, item_id: &str) -> AudioResponse {
+    open_audio_stream(state, item_id).await
 }
 
 #[get("/Audio/<item_id>/main.m3u8")]

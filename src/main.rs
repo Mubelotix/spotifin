@@ -2,6 +2,7 @@ mod audio;
 mod bridge;
 mod catalog;
 mod jellyfin;
+mod player;
 mod spotify;
 
 use std::path::PathBuf;
@@ -20,6 +21,7 @@ pub struct AppState {
     audio: AudioPaths,
     pub catalog: std::sync::Arc<std::sync::RwLock<catalog::Catalog>>,
     pub bridge: bridge::BridgeState,
+    pub player: player::PlayerControl,
 }
 
 fn data_dir() -> PathBuf {
@@ -41,7 +43,7 @@ async fn refresh_loop(bridge: bridge::BridgeState, catalog: std::sync::Arc<std::
     loop {
         match spotify::collect(&bridge).await {
             Ok(fresh) => {
-                *catalog.write().unwrap() = fresh;
+                catalog.write().unwrap().merge(fresh);
                 eprintln!("catalog refreshed");
                 tokio::time::sleep(REFRESH_INTERVAL).await;
             }
@@ -71,6 +73,7 @@ async fn rocket() -> _ {
         },
         catalog: Arc::default(),
         bridge: bridge::BridgeState::default(),
+        player: player::PlayerControl::default(),
     };
 
     if let Err(error) = tokio::fs::create_dir_all(&hls).await {
