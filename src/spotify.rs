@@ -5,9 +5,9 @@ use uuid::Uuid;
 use crate::bridge::{eval_on_bridge, BridgeState};
 use crate::catalog::{self, Album, Artist, Catalog, Playlist, PlaylistEntry, Track};
 
-/// One eval per refresh: pull playlists and liked tracks, then saved albums
-/// with their tracks and followed artists. Runs inside the Spotify renderer,
-/// so it is the client querying its own backend.
+/// One eval per refresh: pull playlists (rootlist + liked songs), then saved
+/// albums with their tracks and followed artists. Runs inside the Spotify
+/// renderer, so it is the client querying its own backend.
 const COLLECT_JS: &str = r#"
 (async () => {
     async function dumpPlaylist(uri, fallbackName, liked = false) {
@@ -78,7 +78,7 @@ const COLLECT_JS: &str = r#"
         }));
     }
 
-    const out = { playlists: [], virtual_albums: [], liked_tracks: [], albums: [], artists: [], errors: [] };
+    const out = { playlists: [], virtual_albums: [], albums: [], artists: [], errors: [] };
     const cardImage = a => {
         for (let node = a; node; node = node.parentElement) {
             const image = node.querySelector("header img")?.src || node.querySelector("img")?.src;
@@ -121,7 +121,7 @@ const COLLECT_JS: &str = r#"
     ].filter((uri, index, all) => uri && all.indexOf(uri) === index);
     const root = await Spicetify.Platform.RootlistAPI.getContents({ offset: 0, limit: 500 });
     for (const entry of root.items) {
-        if (entry.type !== "playlist" || likedUris.includes(entry.uri)) continue;
+        if (entry.type !== "playlist") continue;
         try { out.playlists.push(await dumpPlaylist(entry.uri, entry.name)); }
         catch (e) { out.errors.push(`playlist ${entry.uri}: ${e}`); }
     }
@@ -129,7 +129,8 @@ const COLLECT_JS: &str = r#"
         try {
             const liked = await dumpPlaylist(uri, "Liked Songs", true);
             if (liked.tracks.length || uri === likedUris[likedUris.length - 1]) {
-                out.liked_tracks.push(...liked.tracks);
+                liked.name = "Liked Songs";
+                out.playlists.push(liked);
                 break;
             }
         } catch (e) { out.errors.push(`liked songs ${uri}: ${e}`); }
@@ -199,9 +200,7 @@ pub async fn load_playlist_cache(cache_dir: &Path) -> Catalog {
         let Ok(value) = serde_json::from_str::<Value>(&raw) else {
             continue;
         };
-        if value.get("uri").and_then(Value::as_str).is_some()
-            && value.get("liked").and_then(Value::as_bool) != Some(true)
-        {
+        if value.get("uri").and_then(Value::as_str).is_some() {
             add_playlist(&mut catalog, &value);
         }
     }
@@ -412,13 +411,15 @@ pub async fn set_favorite(bridge: &BridgeState, uri: &str, favorite: bool) -> Re
 
 fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
     let mut catalog = Catalog::new();
-    for track in array_of(raw.get("liked_tracks")) {
-        if let Some(track_id) = add_track(&mut catalog, track) {
-            catalog.set_favorite(track_id, true);
-        }
-    }
     for playlist in array_of(raw.get("playlists")) {
         add_playlist(&mut catalog, playlist);
+        if playlist.get("liked").and_then(Value::as_bool) == Some(true) {
+            for track in array_of(playlist.get("tracks")) {
+                if let Some(uri) = str_field(track, "uri") {
+                    catalog.set_favorite(catalog::stable_id(uri), true);
+                }
+            }
+        }
     }
     for album in array_of(raw.get("albums")) {
         add_saved_album(&mut catalog, album);
