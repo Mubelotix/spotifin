@@ -87,6 +87,12 @@ pub fn public_system_info() -> Json<Value> {
     }))
 }
 
+/// Probed by clients after authentication to confirm the API is responsive.
+#[get("/System/Ping")]
+pub fn ping() -> Json<Value> {
+    Json(serde_json::json!({ "Status": "OK" }))
+}
+
 /// Fintunes opens the server URL in a WebView and reads these values from the
 /// Jellyfin web client's local storage instead of calling AuthenticateByName.
 #[get("/")]

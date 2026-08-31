@@ -16,6 +16,7 @@ pub fn routes() -> Vec<Route> {
         auth::authenticate,
         auth::web_client_bootstrap,
         auth::public_system_info,
+        auth::ping,
         auth::public_users,
         auth::get_user,
         auth::get_me,
