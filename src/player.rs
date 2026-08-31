@@ -11,6 +11,8 @@ use crate::bridge::{eval_on_bridge, BridgeState};
 #[derive(Default)]
 struct PlayerInner {
     last_item: Mutex<Option<uuid::Uuid>>,
+    last_switch: Mutex<Option<Instant>>,
+    requested_item: Mutex<Option<uuid::Uuid>>,
     session: Mutex<Option<CaptureSession>>,
     last_activity: StdMutex<Option<Instant>>,
     idle_paused: StdMutex<bool>,
@@ -39,6 +41,12 @@ pub(crate) fn capture_bytes_for_duration(duration_ms: u64) -> u64 {
 }
 
 impl PlayerControl {
+    /// Records the track a Jellyfin client explicitly made active. Audio URL
+    /// probes for other queued tracks must not retune the shared Spotify player.
+    pub async fn note_requested(&self, item: uuid::Uuid) {
+        *self.inner.requested_item.lock().await = Some(item);
+    }
+
     /// Capture plan for `item`, if it is the one being recorded.
     pub async fn session_for(&self, item: uuid::Uuid) -> Option<CaptureSession> {
         match self.inner.session.lock().await.as_ref() {
@@ -152,7 +160,7 @@ pub async fn prepare(
     item_id: uuid::Uuid,
     recording: &std::path::Path,
     cache_dir: &std::path::Path,
-) {
+) -> bool {
     state.player.note_activity();
     let (uri, duration_ms) = {
         let catalog = state.catalog.read().unwrap();
@@ -162,17 +170,35 @@ pub async fn prepare(
         }
     };
     let Some(uri) = uri else {
-        return;
+        return false;
     };
 
     let mut last = state.player.inner.last_item.lock().await;
+    let requested = *state.player.inner.requested_item.lock().await;
+    if requested.is_some_and(|requested| requested != item_id) {
+        return false;
+    }
     let still_capturing = state
         .player
         .session_for(item_id)
         .await
         .is_some_and(|session| Instant::now() < session.min_end);
     if *last == Some(item_id) && still_capturing {
-        return;
+        return true;
+    }
+    // Native players probe several queued URLs immediately after a selection.
+    // Do not let those probes retune the shared Spotify player; a later request
+    // outside this window is treated as an intentional track change.
+    if *last != Some(item_id)
+        && state
+            .player
+            .inner
+            .last_switch
+            .lock()
+            .await
+            .is_some_and(|switched| switched.elapsed() < Duration::from_secs(10))
+    {
+        return false;
     }
 
     let previous_len = tokio::fs::metadata(recording).await.map(|m| m.len()).unwrap_or(0);
@@ -186,6 +212,7 @@ pub async fn prepare(
             *state.player.inner.session.lock().await =
                 Some(CaptureSession { item: item_id, min_end, expected_bytes });
             *last = Some(item_id);
+            *state.player.inner.last_switch.lock().await = Some(Instant::now());
             // Park the finished capture in the cache once the song is over.
             tokio::spawn(save_to_cache(
                 recording.to_path_buf(),
@@ -197,6 +224,7 @@ pub async fn prepare(
         }
         Err(error) => eprintln!("could not play {uri}: {error}"),
     }
+    true
 }
 
 /// A few seconds of tail may be chopped off by the recorder's flush buffer;

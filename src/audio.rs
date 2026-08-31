@@ -200,7 +200,9 @@ async fn open_audio_stream(
             explicit_range,
         ));
     }
-    player::prepare(state, id, &state.audio.recording, &state.audio.cache).await;
+    if !player::prepare(state, id, &state.audio.recording, &state.audio.cache).await {
+        return Err(rocket::http::Status::Conflict);
+    }
 
     let session = state.player.session_for(id).await;
     let total = match &session {

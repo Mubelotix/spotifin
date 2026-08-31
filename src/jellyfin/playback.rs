@@ -52,7 +52,10 @@ fn playback_info(item_id: Uuid, state: &State<AppState>) -> Result<Json<Value>, 
 /// Playback reporting is stored as-is for UserData; the Spotify client owns
 /// the real cursor, so these values are informational only.
 #[post("/Sessions/Playing", data = "<body>")]
-pub fn playing_started(state: &State<AppState>, body: Json<Value>) {
+pub async fn playing_started(state: &State<AppState>, body: Json<Value>) {
+    if let Some(item) = body.get("ItemId").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+        state.player.note_requested(item).await;
+    }
     record(state, &body, Report::Start);
 }
 
