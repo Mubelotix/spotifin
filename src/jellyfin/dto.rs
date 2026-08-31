@@ -44,6 +44,7 @@ pub struct BaseItemDto {
     pub name: Option<String>,
     #[serde(rename = "Type")]
     pub kind: &'static str,
+    pub collection_type: Option<&'static str>,
     pub is_folder: Option<bool>,
     pub media_type: Option<&'static str>,
     pub sort_name: Option<String>,
@@ -132,6 +133,7 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         id: item.id(),
         name: Some(item.name().to_string()),
         kind: item.jellyfin_type(),
+        collection_type: matches!(item, Item::Library(_)).then_some("music"),
         sort_name: Some(item.name().to_string()),
         is_folder: Some(item.is_folder()),
         media_type: matches!(item, Item::Track(_)).then_some("Audio"),
