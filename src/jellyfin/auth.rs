@@ -41,6 +41,13 @@ pub struct SessionInfo {
     pub id: &'static str,
     pub play_state: Value,
     pub now_playing_item: Option<Value>,
+    pub user_id: String,
+    pub last_activity_date: &'static str,
+    pub supports_remote_control: bool,
+    pub last_playback_check_in: Option<&'static str>,
+    pub is_active: bool,
+    pub supports_media_control: bool,
+    pub has_custom_device_name: bool,
 }
 
 fn dto() -> UserDto {
@@ -61,8 +68,18 @@ pub fn authenticate(body: Json<Value>) -> Json<AuthResult> {
         user: dto(),
         session_info: SessionInfo {
             id: "spotify-mcp",
-            play_state: serde_json::json!({}),
+            // Finamp deserializes this object eagerly and requires all three
+            // PlayerStateInfo bools when PlayState is present. An idle session
+            // has no play state, so use null instead.
+            play_state: Value::Null,
             now_playing_item: None,
+            user_id: user_id().to_string(),
+            last_activity_date: "1970-01-01T00:00:00Z",
+            supports_remote_control: false,
+            last_playback_check_in: None,
+            is_active: false,
+            supports_media_control: false,
+            has_custom_device_name: false,
         },
         access_token: ACCESS_TOKEN,
         server_id: user_id().to_string(),
