@@ -14,6 +14,7 @@ use rocket::Route;
 pub fn routes() -> Vec<Route> {
     rocket::routes![
         auth::authenticate,
+        auth::web_client_bootstrap,
         auth::public_system_info,
         auth::public_users,
         auth::get_user,

@@ -1,6 +1,7 @@
 use rocket::http::Status;
-use rocket::{get, post};
+use rocket::response::content::RawHtml;
 use rocket::serde::json::Json;
+use rocket::{get, post};
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -84,4 +85,26 @@ pub fn public_system_info() -> Json<Value> {
         "Version": "10.8.13",
         "OperatingSystem": "Linux",
     }))
+}
+
+/// Fintunes opens the server URL in a WebView and reads these values from the
+/// Jellyfin web client's local storage instead of calling AuthenticateByName.
+#[get("/")]
+pub fn web_client_bootstrap() -> RawHtml<String> {
+    let user_id = user_id();
+    let server_id = user_id.to_string();
+    let credentials = serde_json::json!({
+        "Servers": [{
+            "ManualAddress": "__SERVER_ORIGIN__",
+            "ManualAddressOnly": true,
+            "Id": server_id,
+            "UserId": user_id,
+            "AccessToken": ACCESS_TOKEN,
+            "LocalAddress": "__SERVER_ORIGIN__"
+        }]
+    });
+    let credentials = serde_json::to_string(&credentials).expect("credentials are serializable");
+    RawHtml(format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>spotify-mcp</title><script>const c={credentials:?}.replaceAll('__SERVER_ORIGIN__',location.origin);localStorage.setItem('jellyfin_credentials',c);localStorage.setItem('_deviceId2','spotify-mcp-fintunes');</script>"
+    ))
 }
