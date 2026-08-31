@@ -18,3 +18,12 @@
 | Display lyrics | ❌ |  |  |  |  |  |  |  |
 | Follow artist | ✅ |  |  |  |  |  |  |  |
 | Save album | ✅ |  |  |  |  |  |  |  |
+
+## Spotify Recommendations
+
+Clients that support autoplay use Jellyfin's **Instant Mix** feature. This
+corresponds to Spotify's recommended songs and fills the queue with roughly two
+and a half hours of Spotify recommendations.
+
+Spotify's **Daily Mixes** and **Radios**, normally shown on the Spotify home
+page, are exposed as playlists.
