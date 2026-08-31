@@ -38,6 +38,7 @@ fn parse_types(raw: Option<String>) -> Vec<&'static str> {
         ("MusicArtist", "MusicArtist"),
         ("MusicGenre", "MusicGenre"),
         ("Playlist", "Playlist"),
+        ("ManualPlaylistsFolder", "ManualPlaylistsFolder"),
         ("CollectionFolder", "CollectionFolder"),
         ("Folder", "CollectionFolder"),
     ];
@@ -209,7 +210,14 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     };
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
-    let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();
+    let dtos = items
+        .iter()
+        .map(|item| {
+            let mut dto = base_item(&catalog, item, None);
+            dto.parent_id = parent;
+            dto
+        })
+        .collect();
     QueryResult { items: dtos, total_record_count: total, start_index: start }
 }
 

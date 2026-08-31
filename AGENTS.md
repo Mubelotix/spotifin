@@ -9,6 +9,7 @@ The supported Jellyfin music clients are:
 - **Finamp**: https://github.com/finamp-app/finamp
 - **Fintunes**: https://github.com/leinelissen/jellyfin-audio-player
 - **Yuzic**: https://github.com/eftpmc/yuzic
+- **Jellify**: https://github.com/Jellify-Music/App
 - **CassetteCat**: https://github.com/samyyy2311/CassetteCat
 - **Wavio**: https://github.com/Joel-Mercier/wavio
 - **Linthra**: https://github.com/TheZupZup/Linthra

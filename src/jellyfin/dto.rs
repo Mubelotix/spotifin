@@ -69,6 +69,7 @@ pub struct BaseItemDto {
     pub playlist_item_id: Option<Uuid>,
     pub parent_id: Option<Uuid>,
     pub media_sources: Option<Vec<MediaSourceDto>>,
+    pub path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -191,7 +192,11 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         id: item.id(),
         name: Some(item.name().to_string()),
         kind: item.jellyfin_type(),
-        collection_type: matches!(item, Item::Library(_)).then_some("music"),
+        collection_type: match item {
+            Item::Library(_) => Some("music"),
+            Item::PlaylistLibrary => Some("playlists"),
+            _ => None,
+        },
         sort_name: Some(item.name().to_string()),
         is_folder: Some(item.is_folder()),
         media_type: matches!(item, Item::Track(_)).then_some("Audio"),
@@ -213,6 +218,7 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         playlist_item_id,
         parent_id: None,
         media_sources: None,
+        path: None,
     };
     match item {
         Item::Track(track) => fill_track(catalog, &mut dto, track),
@@ -231,6 +237,7 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
                     * TICKS_PER_MS,
             );
             dto.image_tags = image_tag(&playlist.image);
+            dto.path = Some(format!("/data/playlists/{}", playlist.id));
         }
         Item::Artist(artist) => {
             // Fintunes renders artist collections without guarding these

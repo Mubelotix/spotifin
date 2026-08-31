@@ -54,6 +54,31 @@ pub async fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<
     })))
 }
 
+/// Jellify saves a playlist by sending its complete ordered contents.
+#[post("/Playlists/<playlist_id>", format = "json", data = "<body>")]
+pub async fn update_playlist(playlist_id: Uuid, body: Json<Value>, state: &State<AppState>) -> Result<Status, Status> {
+    let name = body.0.get("Name").and_then(Value::as_str).map(str::to_string);
+    let ids = body
+        .0
+        .get("Ids")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let (uri, track_uris) = {
+        let catalog = state.catalog.read().unwrap();
+        let playlist = catalog.playlists.get(&playlist_id).ok_or(Status::NotFound)?;
+        let uri = playlist.spotify_uri.clone().ok_or(Status::Conflict)?;
+        let tracks = ids.iter().filter_map(|id| Uuid::parse_str(id).ok()).filter_map(|id| catalog.tracks.get(&id).map(|track| track.uri.clone())).collect::<Vec<_>>();
+        (uri, tracks)
+    };
+    if let Some(name) = name {
+        spotify::rename_playlist(&state.bridge, &uri, &name).await.map_err(|_| Status::BadGateway)?;
+    }
+    spotify::replace_playlist(&state.bridge, &uri, &track_uris).await.map_err(|_| Status::BadGateway)?;
+    resync(state, playlist_id).await;
+    Ok(Status::NoContent)
+}
+
 /// Deletes a user-owned Spotify playlist from the rootlist.
 #[delete("/Playlists/<playlist_id>")]
 pub async fn delete_playlist(playlist_id: Uuid, state: &State<AppState>) -> Result<Status, Status> {
@@ -87,15 +112,14 @@ pub async fn playlist_items(
     let Some(playlist) = catalog.playlists.get(&playlist_id) else {
         return Json(QueryResult { items: vec![], total_record_count: 0, start_index: 0 });
     };
-    let tracks = catalog.playlist_tracks(playlist);
-    let total = tracks.len();
-    let items = tracks
-        .into_iter()
-        .zip(&playlist.entries)
+    let total = playlist.entries.len();
+    let items = playlist.entries
+        .iter()
         .skip(start)
         .take(query.limit.unwrap_or(usize::MAX))
+        .filter_map(|entry| catalog.tracks.get(&entry.track_id).map(|track| (track, entry)))
         .map(|(track, entry)| {
-            let mut item = base_item(&catalog, &track, Some(entry.id));
+            let mut item = base_item(&catalog, &crate::catalog::Item::Track(track), Some(entry.id));
             item.parent_id = Some(playlist_id);
             item
         })

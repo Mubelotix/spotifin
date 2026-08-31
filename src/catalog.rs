@@ -69,6 +69,7 @@ pub struct Playlist {
 #[derive(Clone, Copy)]
 pub enum Item<'a> {
     Library(&'a str),
+    PlaylistLibrary,
     Track(&'a Track),
     Album(&'a Album),
     Artist(&'a Artist),
@@ -79,6 +80,7 @@ impl Item<'_> {
     pub fn id(&self) -> Uuid {
         match self {
             Item::Library(_) => library_id(),
+            Item::PlaylistLibrary => playlist_library_id(),
             Item::Track(t) => t.id,
             Item::Album(a) => a.id,
             Item::Artist(a) => a.id,
@@ -89,6 +91,7 @@ impl Item<'_> {
     pub fn name(&self) -> &str {
         match self {
             Item::Library(name) => name,
+            Item::PlaylistLibrary => PLAYLIST_LIBRARY_NAME,
             Item::Track(t) => &t.name,
             Item::Album(a) => &a.name,
             Item::Artist(a) => &a.name,
@@ -99,6 +102,7 @@ impl Item<'_> {
     pub fn jellyfin_type(&self) -> &'static str {
         match self {
             Item::Library(_) => "CollectionFolder",
+            Item::PlaylistLibrary => "ManualPlaylistsFolder",
             Item::Track(_) => "Audio",
             Item::Album(_) => "MusicAlbum",
             Item::Artist(_) => "MusicArtist",
@@ -114,6 +118,12 @@ impl Item<'_> {
 pub fn library_id() -> Uuid {
     stable_id("library:music")
 }
+
+pub fn playlist_library_id() -> Uuid {
+    stable_id("library:playlists")
+}
+
+pub const PLAYLIST_LIBRARY_NAME: &str = "Playlists";
 
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
@@ -203,6 +213,9 @@ impl Catalog {
     pub fn item(&self, id: Uuid) -> Option<Item<'_>> {
         if id == library_id() {
             return Some(Item::Library(LIBRARY_NAME));
+        }
+        if id == playlist_library_id() {
+            return Some(Item::PlaylistLibrary);
         }
         if let Some(t) = self.tracks.get(&id) {
             return Some(Item::Track(t));
@@ -302,12 +315,15 @@ impl Catalog {
     ) -> Vec<Item<'_>> {
         let mut items = self.candidate_items(parent);
         items.retain(|item| self.matches(item, types, parent, search, favorites_only, artist_ids, album_artist_ids));
-        items.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
+        if !matches!(parent, Some(id) if self.playlists.contains_key(&id)) {
+            items.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
+        }
         items
     }
 
     fn candidate_items(&self, parent: Option<Uuid>) -> Vec<Item<'_>> {
         match parent {
+            Some(id) if id == playlist_library_id() => self.playlists.values().map(Item::Playlist).collect(),
             Some(id) if id != library_id() => match self.item(id) {
                 Some(Item::Album(_)) => self.track_children(|t| t.album_id == Some(id)),
                 Some(Item::Artist(_)) => {
@@ -333,7 +349,7 @@ impl Catalog {
     }
 
     fn all_items(&self) -> Vec<Item<'_>> {
-        let mut items = vec![Item::Library(LIBRARY_NAME)];
+        let mut items = vec![Item::Library(LIBRARY_NAME), Item::PlaylistLibrary];
         items.extend(self.artists.values().map(Item::Artist));
         items.extend(self.albums.values().map(Item::Album));
         items.extend(self.playlists.values().map(Item::Playlist));
@@ -389,7 +405,7 @@ impl Catalog {
                     || !artist_ids.is_empty()
                     || !album_artist_ids.is_empty()
             }
-            Item::Library(_) | Item::Playlist(_) => true,
+            Item::Library(_) | Item::PlaylistLibrary | Item::Playlist(_) => true,
         };
         if !listed {
             return false;
