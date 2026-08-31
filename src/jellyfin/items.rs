@@ -87,11 +87,11 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
         .map(|filters| filters.split(',').any(|filter| filter.trim().eq_ignore_ascii_case("IsFavorite")))
         .unwrap_or(false);
 
-    // Virtual Spotify collections are metadata-only until their album page is
+    // Synthesized Spotify playlists are metadata-only until their page is
     // opened. Fetching each backing playlist here keeps normal refreshes cheap.
     if let Some(parent_id) = parent {
-        let sources = state.catalog.read().unwrap().virtual_albums.get(&parent_id).and_then(|album| {
-            (!album.loaded).then(|| album.source_uris.clone())
+        let sources = state.catalog.read().unwrap().playlists.get(&parent_id).and_then(|playlist| {
+            (!playlist.loaded).then(|| playlist.source_uris.clone())
         });
         if let Some(sources) = sources {
             for source in sources {

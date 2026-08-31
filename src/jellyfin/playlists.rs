@@ -26,8 +26,22 @@ pub fn playlists(query: PageQuery, state: &State<AppState>) -> Json<QueryResult<
     Json(QueryResult { items, total_record_count: total, start_index: start })
 }
 
+async fn load_synthetic_playlist(playlist_id: Uuid, state: &State<AppState>) {
+    let sources = state.catalog.read().unwrap().playlists.get(&playlist_id).and_then(|playlist| {
+        (!playlist.loaded).then(|| playlist.source_uris.clone())
+    });
+    let Some(sources) = sources else { return };
+    for source in sources {
+        match spotify::fetch_playlist(&state.bridge, &source).await {
+            Ok(raw) => spotify::absorb_virtual_playlist(&mut state.catalog.write().unwrap(), playlist_id, &raw),
+            Err(error) => eprintln!("synthetic playlist fetch failed for {source}: {error}"),
+        }
+    }
+}
+
 #[get("/Playlists/<playlist_id>")]
-pub fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<Json<Value>> {
+pub async fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<Json<Value>> {
+    load_synthetic_playlist(playlist_id, state).await;
     let catalog = state.catalog.read().unwrap();
     let playlist = catalog.playlists.get(&playlist_id)?;
     Some(Json(serde_json::json!({
@@ -40,11 +54,12 @@ pub fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<Json<V
 }
 
 #[get("/Playlists/<playlist_id>/Items?<query..>")]
-pub fn playlist_items(
+pub async fn playlist_items(
     playlist_id: Uuid,
     query: PageQuery,
     state: &State<AppState>,
 ) -> Json<QueryResult<crate::jellyfin::dto::BaseItemDto>> {
+    load_synthetic_playlist(playlist_id, state).await;
     let catalog = state.catalog.read().unwrap();
     let start = query.start_index.unwrap_or(0);
     let Some(playlist) = catalog.playlists.get(&playlist_id) else {
@@ -84,6 +99,8 @@ pub async fn create_playlist(body: Json<Value>, state: &State<AppState>) -> Resu
             name: name.clone(),
             image: None,
             spotify_uri: Some(uri.clone()),
+            source_uris: Vec::new(),
+            loaded: true,
             entries: Vec::new(),
         };
         catalog.playlists.entry(id).or_insert(playlist);

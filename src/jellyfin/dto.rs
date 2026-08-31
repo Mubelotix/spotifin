@@ -171,14 +171,6 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
     match item {
         Item::Track(track) => fill_track(catalog, &mut dto, track),
         Item::Album(album) => fill_album(catalog, &mut dto, album),
-        Item::VirtualAlbum(album) => {
-            dto.child_count = Some(album.entries.len());
-            dto.artists = Some(Vec::new());
-            dto.artist_items = Some(Vec::new());
-            dto.album_artists = Some(Vec::new());
-            dto.run_time_ticks = Some(0);
-            dto.image_tags = image_tag(&album.image);
-        }
         Item::Playlist(playlist) => {
             dto.child_count = Some(playlist.entries.len());
             dto.image_tags = image_tag(&playlist.image);
