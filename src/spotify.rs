@@ -10,12 +10,23 @@ use crate::catalog::{self, Album, Artist, Catalog, Playlist, PlaylistEntry, Trac
 const COLLECT_JS: &str = r#"
 (async () => {
     async function dumpPlaylist(uri, fallbackName) {
-        const p = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri);
+        const pageSize = 200;
+        const first = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri, null,
+            { offset: 0, limit: pageSize });
+        const items = [...(first.contents?.items || [])];
+        const total = first.contents?.totalLength ?? first.metadata?.totalLength ?? items.length;
+        for (let offset = items.length; offset < total; offset += pageSize) {
+            const page = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri, null,
+                { offset, limit: pageSize });
+            const next = page.contents?.items || [];
+            if (!next.length) break;
+            items.push(...next);
+        }
         return {
             uri,
-            name: p.metadata?.name ?? fallbackName ?? "Playlist",
-            image: (p.metadata?.images && p.metadata.images[0]?.url) || null,
-            tracks: (p.contents?.items || []).filter(t => t.type === "track").map(t => ({
+            name: first.metadata?.name ?? fallbackName ?? "Playlist",
+            image: (first.metadata?.images && first.metadata.images[0]?.url) || null,
+            tracks: items.filter(t => t.type === "track").map(t => ({
                 uid: t.uid ?? null,
                 uri: t.uri,
                 name: t.name ?? null,
@@ -65,19 +76,34 @@ const COLLECT_JS: &str = r#"
         }));
     }
 
-    const out = { playlists: [], albums: [], artists: [] };
+    const out = { playlists: [], albums: [], artists: [], errors: [] };
     const root = await Spicetify.Platform.RootlistAPI.getContents({ offset: 0, limit: 500 });
     for (const entry of root.items) {
         if (entry.type !== "playlist") continue;
-        try { out.playlists.push(await dumpPlaylist(entry.uri, entry.name)); } catch (e) {}
+        try { out.playlists.push(await dumpPlaylist(entry.uri, entry.name)); }
+        catch (e) { out.errors.push(`playlist ${entry.uri}: ${e}`); }
     }
-    try { out.playlists.push(await dumpPlaylist("spotify:user:me:collection", "Liked Songs")); } catch (e) {}
+    const likedUris = [
+        Spicetify.Platform.LibraryAPI._likedSongsUri,
+        "spotify:user:me:collection",
+    ].filter((uri, index, all) => uri && all.indexOf(uri) === index);
+    for (const uri of likedUris) {
+        try {
+            const liked = await dumpPlaylist(uri, "Liked Songs");
+            if (liked.tracks.length || uri === likedUris[likedUris.length - 1]) {
+                liked.name = "Liked Songs";
+                out.playlists.push(liked);
+                break;
+            }
+        } catch (e) { out.errors.push(`liked songs ${uri}: ${e}`); }
+    }
 
     try {
         const library = await Spicetify.Platform.LibraryAPI.getContents({ offset: 0, limit: 500 });
         for (const row of library.items || []) {
             if (row.type === "album") {
-                try { out.albums.push(await dumpAlbum(row.uri, row.name)); } catch (e) {}
+                try { out.albums.push(await dumpAlbum(row.uri, row.name)); }
+                catch (e) { out.errors.push(`album ${row.uri}: ${e}`); }
             } else if (row.type === "artist") {
                 out.artists.push({ uri: row.uri, name: row.name });
             }
@@ -98,6 +124,11 @@ pub async fn collect(bridge: &crate::bridge::BridgeState) -> Result<Catalog, Str
         .ok_or_else(|| "collect returned no value".to_string())?;
     let playlists = serde_json::from_str::<Value>(raw)
         .map_err(|error| format!("collect JSON invalid: {error}"))?;
+    if let Some(errors) = playlists.get("errors").and_then(Value::as_array) {
+        for error in errors.iter().filter_map(Value::as_str) {
+            eprintln!("catalog collector: {error}");
+        }
+    }
     parse_catalog(&playlists)
 }
 
