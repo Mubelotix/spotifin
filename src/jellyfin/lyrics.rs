@@ -31,6 +31,7 @@ pub async fn lyrics(item_id: Uuid, state: &State<AppState>) -> Result<Json<Value
             if !lines.is_empty() {
                 return Ok(Json(cached));
             }
+            return Err(Status::NotFound);
         }
     }
 
@@ -60,12 +61,12 @@ pub async fn lyrics(item_id: Uuid, state: &State<AppState>) -> Result<Json<Value
         },
         "Lyrics": lyrics,
     });
-    if lines.is_empty() {
-        return Err(Status::NotFound);
-    }
     tokio::fs::create_dir_all(&*state.audio.cache).await.map_err(|_| Status::InternalServerError)?;
     tokio::fs::write(&cache_path, serde_json::to_vec(&response).map_err(|_| Status::InternalServerError)?)
         .await
         .map_err(|_| Status::InternalServerError)?;
+    if lines.is_empty() {
+        return Err(Status::NotFound);
+    }
     Ok(Json(response))
 }
