@@ -32,6 +32,17 @@ podman build -t spicetify-web .
 ./run-spotify.sh   # then open https://localhost:8031 (user: spotify, password: spotify)
 ```
 
+For backend-only iteration, build on the host and replace the backend process
+inside the running container without restarting Spotify:
+
+```bash
+./dev-backend.sh            # fast debug build
+./dev-backend.sh --release  # release build
+```
+
+The complete image remains the release workflow; `.containerignore` excludes
+the persistent Spotify data and local build artifacts from its build context.
+
 Spicetify plugins are env vars on `run-spotify.sh`: `SPICETIFY_EXTENSIONS` (default `adblock.js bridge.js`), `SPICETIFY_CUSTOM_APPS`, `SPICETIFY_THEME`.
 
 ## How it works
