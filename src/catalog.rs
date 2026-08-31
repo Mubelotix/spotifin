@@ -216,11 +216,17 @@ impl Catalog {
     }
 
     pub fn is_favorite(&self, id: Uuid) -> bool {
-        self.favorites.contains(&id)
+        self.favorites.contains(&id) || self.followed_artists.contains(&id)
     }
 
     pub fn set_favorite(&mut self, id: Uuid, favorite: bool) {
-        if favorite {
+        if self.artists.contains_key(&id) {
+            if favorite {
+                self.followed_artists.insert(id);
+            } else {
+                self.followed_artists.remove(&id);
+            }
+        } else if favorite {
             self.favorites.insert(id);
         } else {
             self.favorites.remove(&id);
