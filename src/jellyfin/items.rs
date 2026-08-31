@@ -23,6 +23,8 @@ pub struct ItemQuery {
     artist_ids: Option<String>,
     #[field(name = "AlbumArtistIds")]
     album_artist_ids: Option<String>,
+    #[field(name = "Ids")]
+    ids: Option<String>,
     #[field(name = "StartIndex")]
     start_index: Option<usize>,
     #[field(name = "Limit")]
@@ -69,6 +71,7 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     let search = query.search_term.as_deref().unwrap_or_default();
     let mut artist_ids = parse_ids(query.artist_ids.as_deref());
     let album_artist_ids = parse_ids(query.album_artist_ids.as_deref());
+    let ids = parse_ids(query.ids.as_deref());
     if let Some(id) = parent {
         let is_artist = state.catalog.read().unwrap().artists.contains_key(&id);
         if is_artist && !artist_ids.contains(&id) {
@@ -136,7 +139,10 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
 
     let catalog = state.catalog.read().unwrap();
     let term = if search.is_empty() { None } else { Some(search) };
-    let found = catalog.query(&types, parent, term, favorites_only, &artist_ids, &album_artist_ids);
+    let mut found = catalog.query(&types, parent, term, favorites_only, &artist_ids, &album_artist_ids);
+    if !ids.is_empty() {
+        found.retain(|item| ids.contains(&item.id()));
+    }
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
     let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();
