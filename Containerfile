@@ -36,24 +36,21 @@ RUN printf '%s\n' \
     && chmod +x /defaults/autostart
 
 # Init script (runs as root at boot): fix /config ownership (root-owned leftovers
-# prevent the Spotify window from ever mapping), clean locks, apply spicetify on first boot
+# prevent the Spotify window from ever mapping), clean locks, apply spicetify on first boot.
+# Spicetify refuses to run as root and files it touches must stay owned by abc.
 RUN mkdir -p /custom-cont-init.d \
     && printf '%s\n' \
         '#!/bin/bash' \
         'set -e' \
-        'export HOME=/config' \
-        'export SPICETIFY_CONFIG=/config/.config/spicetify' \
-        'chown -R abc:abc /config/.cache /config/.config 2>/dev/null || true' \
+        'chown -R abc:abc /config/.cache /config/.config /config/spicetify 2>/dev/null || true' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
         'mkdir -p /config/.config/spotify' \
         '[ -f /config/.config/spotify/prefs ] || touch /config/.config/spotify/prefs' \
         'chmod -R a+rwX /usr/share/spotify' \
-        'if [ ! -f "$SPICETIFY_CONFIG/config-xpui.ini" ]; then' \
-        '    spicetify backup >/dev/null 2>&1 || true' \
-        '    sed -i "s|^prefs_path = .*|prefs_path = /config/.config/spotify/prefs|" "$SPICETIFY_CONFIG/config-xpui.ini"' \
-        '    spicetify backup apply' \
+        'if [ ! -f /config/spicetify/config-xpui.ini ]; then' \
+        '    su abc -s /bin/bash -c "HOME=/config SPICETIFY_CONFIG=/config/spicetify spicetify backup apply" || true' \
         'fi' \
-        'chown -R abc:abc "$SPICETIFY_CONFIG" /config/.config/spotify 2>/dev/null || true' \
+        'chown -R abc:abc /config/spicetify 2>/dev/null || true' \
         > /custom-cont-init.d/50-spicetify-init.sh \
     && chmod +x /custom-cont-init.d/50-spicetify-init.sh

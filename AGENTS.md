@@ -25,3 +25,19 @@ Keep the file count minimal:
 podman build -t spicetify-web .
 ./run-spotify.sh   # then open https://localhost:8031 (user: spotify, password: spotify)
 ```
+
+## Spicetify plugins
+
+Config lives in `./data/spicetify/config-xpui.ini` (persisted). Enable plugins either by editing it directly (`extensions`, `custom_apps`, `theme` keys) or via the CLI:
+
+```bash
+# Must run as abc with HOME=/config — spicetify refuses root, and root-owned
+# output files cause the black-screen bug
+alias spicetify='podman exec -u abc -e HOME=/config -e SPICETIFY_CONFIG=/config/spicetify spotify spicetify'
+
+spicetify config extensions fullAppDisplay.js   # quote names with '+' like "shuffle+.js"
+spicetify config custom_apps lyrics-plus
+spicetify apply
+```
+
+Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/spicetify/CustomApps/` (lyrics-plus, new-releases, reddit). More via the spicetify Marketplace.
