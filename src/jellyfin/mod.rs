@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod dto;
 pub mod images;
+pub mod lyrics;
 pub mod items;
 pub mod playback;
 pub mod playlists;
@@ -37,6 +38,7 @@ pub fn routes() -> Vec<Route> {
         user_data::unmark_favorite,
         user_data::mark_played,
         user_data::unmark_played,
+        lyrics::lyrics,
         playback::playback_info_get,
         playback::playback_info_post,
         playback::playing_started,

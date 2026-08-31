@@ -131,6 +131,50 @@ pub fn ingest_track(catalog: &mut Catalog, raw: &Value) -> Option<Uuid> {
     add_track(catalog, raw)
 }
 
+const LYRICS_JS: &str = r#"
+(async () => {
+    const id = URI_PLACEHOLDER.split(":").pop();
+    const r = await Spicetify.CosmosAsync.get(
+        "https://spclient.wg.spotify.com/color-lyrics/v2/track/" + id +
+        "?format=json&vocalRemoval=false&market=from_token"
+    );
+    return JSON.stringify((r?.lyrics?.lines || []).map(l => ({
+        start: Number(l.startTimeMs ?? 0),
+        text: l.words ?? ""
+    })));
+})()
+"#;
+
+pub struct Lyric {
+    pub start_ms: u64,
+    pub text: String,
+}
+
+pub async fn lyrics(bridge: &BridgeState, track_uri: &str) -> Result<Vec<Lyric>, String> {
+    let literal = serde_json::to_string(track_uri).map_err(|e| e.to_string())?;
+    let code = LYRICS_JS.replace("URI_PLACEHOLDER", &literal);
+    let response = eval_on_bridge(bridge, code)
+        .await
+        .map_err(|error| format!("lyrics failed: {error}"))?;
+    let raw = response
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "lyrics returned no value".to_string())?;
+    let lines = serde_json::from_str::<Value>(raw).map_err(|error| format!("lyrics JSON invalid: {error}"))?;
+    Ok(lines
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|line| {
+            Some(Lyric {
+                start_ms: line.get("start")?.as_u64()?,
+                text: str_field(line, "text")?.to_string(),
+            })
+        })
+        .collect())
+}
+
 fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
     let mut catalog = Catalog::new();
     for playlist in array_of(raw.get("playlists")) {
