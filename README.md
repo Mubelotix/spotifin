@@ -10,7 +10,7 @@
 | Play an uncached track | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
 | Play a cached track | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
 | Download tracks | ✅ | ✅ Whole albums | ✅ Whole album or artist | ✅ |  |  |  |  |
-| Autoplay | ✅ | ⚠️ From search | ✅ | ⚠️ Manual Queuing |  |  |  |  |
+| Autoplay | ✅ | ⚠️ From search | ✅ | ✅ |  |  |  |  |
 | Skip tracks | ✅ | ✅ | ✅ | ✅ |  |  |  |  |
 | Seek forward and backward | ✅ | ✅ | ✅ | ❌ |  |  |  |  |
 | Like/Unlike | ✅ | ✖️ | ✅ | ✅ |  |  |  |  |
