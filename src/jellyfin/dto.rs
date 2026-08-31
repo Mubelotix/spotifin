@@ -69,6 +69,7 @@ pub struct BaseItemDto {
     pub playlist_item_id: Option<Uuid>,
     pub parent_id: Option<Uuid>,
     pub media_sources: Option<Vec<MediaSourceDto>>,
+    pub media_streams: Option<Vec<MediaStreamDto>>,
     pub path: Option<String>,
 }
 
@@ -218,6 +219,7 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         playlist_item_id,
         parent_id: None,
         media_sources: None,
+        media_streams: None,
         path: None,
     };
     match item {
@@ -261,10 +263,28 @@ fn fill_track(catalog: &Catalog, dto: &mut BaseItemDto, track: &crate::catalog::
     let (artists, artist_items) = artist_refs(catalog, &track.artist_ids);
     dto.artists = Some(artists);
     dto.artist_items = Some(artist_items);
+    // Fintunes' player model treats these collection fields as required,
+    // including for tracks whose album has not been resolved yet.
+    dto.album_artists = Some(Vec::new());
+    dto.image_tags = Some(ImageTags { primary: String::new() });
     dto.index_number = Some(track.index);
     dto.parent_index_number = Some(track.disc);
     dto.run_time_ticks = Some(track.duration_ms * TICKS_PER_MS);
-    dto.container = Some("mp3");
+    dto.container = Some("aac");
+    dto.media_streams = Some(vec![MediaStreamDto {
+        index: 0,
+        stream_type: "Audio",
+        codec: "aac",
+        bit_rate: 192_000,
+        sample_rate: 44_100,
+        channels: 2,
+        is_interlaced: false,
+        is_default: true,
+        is_forced: false,
+        is_external: false,
+        is_text_subtitle_stream: false,
+        supports_external_stream: false,
+    }]);
     dto.media_sources = Some(vec![MediaSourceDto {
         id: track.id,
         protocol: "Http",
