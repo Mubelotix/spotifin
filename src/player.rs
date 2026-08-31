@@ -221,7 +221,10 @@ pub async fn prepare(
     // current stream contain the wrong track. A real skip closes the old
     // stream first, so use that boundary rather than blocking for the song's
     // full duration.
-    if *last != Some(item_id) && state.player.has_live_stream() {
+    if *last != Some(item_id)
+        && state.player.has_live_stream()
+        && requested != Some(item_id)
+    {
         return false;
     }
     // Native players probe several queued URLs immediately after a selection.
