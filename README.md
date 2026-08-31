@@ -1,4 +1,4 @@
-<h1 align="center">Spotify's Jellyfin</h1>
+<h1 align="center">Spotifin</h1>
 
 <p align="center">
   <strong>Spotify's catalog. Jellyfin's clients.</strong><br>
@@ -140,7 +140,7 @@ Client capabilities differ because each app implements a different portion of th
 
 ## For Client Developers
 
-Making a Jellyfin music client work smoothly with Spotify's Jellyfin requires very little changes:
+Making a Jellyfin music client work smoothly with Spotifin requires very little changes:
 
 1. Always send `Sessions/Playing` before you start streaming so the server knows which track to prioritize.
 2. Start playing audio as soon as data arrives. Do not wait to gather a 20-second buffer, because the capture itself will take 20 seconds.
