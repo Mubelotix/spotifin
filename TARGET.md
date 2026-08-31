@@ -7,6 +7,7 @@ controllers and DTOs, and on actual client code from:
 - `finamp-app/Finamp`
 - `leinelissen/jellyfin-audio-player`
 - `samyyy2311/CassetteCat`
+- `Joel-Mercier/wavio`
 
 The repositories were cloned under `/tmp/target-research/`. This is a behavioral
 target, not a copy of Jellyfin's internal implementation. The server API is

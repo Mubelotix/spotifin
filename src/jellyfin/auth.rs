@@ -78,6 +78,12 @@ pub fn logout() -> Status {
 /// Probed by clients during server setup.
 #[get("/System/Info/Public")]
 pub fn public_system_info() -> Json<Value> {
+    system_info()
+}
+
+/// Probed by clients after authentication to confirm the API is responsive.
+#[get("/System/Info")]
+pub fn system_info() -> Json<Value> {
     Json(serde_json::json!({
         "Id": user_id(),
         "ServerName": "spotify-mcp",
@@ -87,7 +93,7 @@ pub fn public_system_info() -> Json<Value> {
     }))
 }
 
-/// Probed by clients after authentication to confirm the API is responsive.
+/// Lightweight liveness endpoint used by some Jellyfin clients.
 #[get("/System/Ping")]
 pub fn ping() -> Json<Value> {
     Json(serde_json::json!({ "Status": "OK" }))
