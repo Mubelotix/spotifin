@@ -149,18 +149,30 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
             catalog.artists.get(artist_id).map(|artist| artist.uri.clone())
         };
         if let Some(uri) = uri {
-            match crate::spotify::artist_tracks(&state.bridge, &uri).await {
-                Ok(results) => {
-                    let mut catalog = state.catalog.write().unwrap();
-                    for track in &results.tracks {
-                        crate::spotify::ingest_track(&mut catalog, track);
+            let fetched = match crate::spotify::load_cached_artist(&state.audio.cache, &uri).await {
+                Some(results) => Some(results),
+                None => match crate::spotify::artist_tracks(&state.bridge, &uri).await {
+                    Ok(results) => {
+                        if let Err(error) = crate::spotify::cache_artist_tracks(&state.audio.cache, &uri, &results).await {
+                            eprintln!("could not cache artist {uri}: {error}");
+                        }
+                        Some(results)
                     }
-                    if let Some(artist) = catalog.artists.get_mut(artist_id) {
-                        artist.image = results.image;
-                        artist.discography_loaded = true;
+                    Err(error) => {
+                        eprintln!("artist fetch failed for {uri}: {error}");
+                        None
                     }
+                },
+            };
+            if let Some(results) = fetched {
+                let mut catalog = state.catalog.write().unwrap();
+                for track in &results.tracks {
+                    crate::spotify::ingest_track(&mut catalog, track);
                 }
-                Err(error) => eprintln!("artist fetch failed for {uri}: {error}"),
+                if let Some(artist) = catalog.artists.get_mut(artist_id) {
+                    artist.image = results.image;
+                    artist.discography_loaded = true;
+                }
             }
         }
     }

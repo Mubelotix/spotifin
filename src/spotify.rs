@@ -274,6 +274,30 @@ pub async fn load_cached_album(cache_dir: &Path, album_uri: &str) -> Option<Vec<
     Some(value.get("tracks")?.as_array()?.clone())
 }
 
+/// Persists the complete artist discography fetched from Spotify. Artist
+/// caches are loaded lazily when an artist page is opened.
+pub async fn cache_artist_tracks(cache_dir: &Path, artist_uri: &str, fetch: &ArtistFetch) -> Result<(), String> {
+    let id = catalog::stable_id(artist_uri);
+    let raw = serde_json::json!({ "uri": artist_uri, "image": fetch.image, "tracks": fetch.tracks });
+    let json = serde_json::to_vec_pretty(&raw).map_err(|error| error.to_string())?;
+    let path = cache_dir.join(format!("artist-{id}.json"));
+    let temporary = cache_dir.join(format!("artist-{id}.json.tmp"));
+    tokio::fs::write(&temporary, json).await.map_err(|error| error.to_string())?;
+    tokio::fs::rename(&temporary, &path).await.map_err(|error| error.to_string())
+}
+
+/// Reads a previously fetched artist without adding it to the catalog.
+pub async fn load_cached_artist(cache_dir: &Path, artist_uri: &str) -> Option<ArtistFetch> {
+    let id = catalog::stable_id(artist_uri);
+    let path = cache_dir.join(format!("artist-{id}.json"));
+    let raw = tokio::fs::read_to_string(path).await.ok()?;
+    let value = serde_json::from_str::<Value>(&raw).ok()?;
+    Some(ArtistFetch {
+        image: value.get("image").and_then(Value::as_str).map(str::to_string),
+        tracks: value.get("tracks")?.as_array()?.clone(),
+    })
+}
+
 const SEARCH_JS: &str = r#"
 (async () => {
     const query = QUERY_PLACEHOLDER;
@@ -969,6 +993,27 @@ mod tests {
         cache_album_tracks(&cache_dir, "spotify:album:cached-album", &tracks).await.unwrap();
         let restored = load_cached_album(&cache_dir, "spotify:album:cached-album").await.unwrap();
         assert_eq!(restored, tracks);
+
+        tokio::fs::remove_dir_all(&cache_dir).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn artist_cache_round_trip() {
+        let cache_dir = std::env::temp_dir().join(format!("spotify-server-artist-cache-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&cache_dir).await;
+        tokio::fs::create_dir_all(&cache_dir).await.unwrap();
+        let fetch = ArtistFetch {
+            image: Some("https://example.test/artist.jpg".to_string()),
+            tracks: vec![serde_json::json!({
+                "uri": "spotify:track:cached-artist-track",
+                "name": "Cached artist track"
+            })],
+        };
+
+        cache_artist_tracks(&cache_dir, "spotify:artist:cached-artist", &fetch).await.unwrap();
+        let restored = load_cached_artist(&cache_dir, "spotify:artist:cached-artist").await.unwrap();
+        assert_eq!(restored.image, fetch.image);
+        assert_eq!(restored.tracks, fetch.tracks);
 
         tokio::fs::remove_dir_all(&cache_dir).await.unwrap();
     }
