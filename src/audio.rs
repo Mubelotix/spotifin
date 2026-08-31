@@ -260,12 +260,17 @@ async fn open_audio_stream(
             true,
         ));
     }
+    if range.0.is_some() && state.player.session_for(id).await.is_none() {
+        // A seek/probe for an uncaptured item must not select that item. The
+        // client will retry with an un-ranged request if it really selected it.
+        return Err(rocket::http::Status::Conflict);
+    }
     if !player::prepare(
         state,
         id,
         &state.audio.recording,
         &state.audio.cache,
-        false,
+        range.0.is_some(),
     )
     .await
     {

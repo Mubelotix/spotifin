@@ -242,7 +242,6 @@ pub async fn prepare(
     // full duration.
     if *last != Some(item_id)
         && state.player.has_live_stream()
-        && probe
     {
         return false;
     }
