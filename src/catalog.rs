@@ -28,6 +28,16 @@ pub struct Album {
 }
 
 #[derive(Clone)]
+pub struct VirtualAlbum {
+    pub id: Uuid,
+    pub name: String,
+    pub image: Option<String>,
+    pub source_uris: Vec<String>,
+    pub entries: Vec<PlaylistEntry>,
+    pub loaded: bool,
+}
+
+#[derive(Clone)]
 pub struct Track {
     pub id: Uuid,
     /// Source Spotify URI, used to drive playback through the client.
@@ -65,6 +75,7 @@ pub enum Item<'a> {
     Library(&'a str),
     Track(&'a Track),
     Album(&'a Album),
+    VirtualAlbum(&'a VirtualAlbum),
     Artist(&'a Artist),
     Playlist(&'a Playlist),
 }
@@ -75,6 +86,7 @@ impl Item<'_> {
             Item::Library(_) => library_id(),
             Item::Track(t) => t.id,
             Item::Album(a) => a.id,
+            Item::VirtualAlbum(a) => a.id,
             Item::Artist(a) => a.id,
             Item::Playlist(p) => p.id,
         }
@@ -85,6 +97,7 @@ impl Item<'_> {
             Item::Library(name) => name,
             Item::Track(t) => &t.name,
             Item::Album(a) => &a.name,
+            Item::VirtualAlbum(a) => &a.name,
             Item::Artist(a) => &a.name,
             Item::Playlist(p) => &p.name,
         }
@@ -95,6 +108,7 @@ impl Item<'_> {
             Item::Library(_) => "CollectionFolder",
             Item::Track(_) => "Audio",
             Item::Album(_) => "MusicAlbum",
+            Item::VirtualAlbum(_) => "MusicAlbum",
             Item::Artist(_) => "MusicArtist",
             Item::Playlist(_) => "Playlist",
         }
@@ -136,6 +150,7 @@ pub const LIBRARY_NAME: &str = "Music";
 pub struct Catalog {
     pub artists: HashMap<Uuid, Artist>,
     pub albums: HashMap<Uuid, Album>,
+    pub virtual_albums: HashMap<Uuid, VirtualAlbum>,
     pub tracks: HashMap<Uuid, Track>,
     pub playlists: HashMap<Uuid, Playlist>,
     /// Albums the user explicitly saved; the only ones listed as browsable.
@@ -173,6 +188,9 @@ impl Catalog {
         for (id, album) in std::mem::take(&mut self.albums) {
             fresh.albums.entry(id).or_insert(album);
         }
+        for (id, album) in std::mem::take(&mut self.virtual_albums) {
+            fresh.virtual_albums.entry(id).or_insert(album);
+        }
         for (id, artist) in std::mem::take(&mut self.artists) {
             fresh.artists.entry(id).or_insert(artist);
         }
@@ -188,6 +206,9 @@ impl Catalog {
         }
         if let Some(a) = self.albums.get(&id) {
             return Some(Item::Album(a));
+        }
+        if let Some(a) = self.virtual_albums.get(&id) {
+            return Some(Item::VirtualAlbum(a));
         }
         if let Some(a) = self.artists.get(&id) {
             return Some(Item::Artist(a));
@@ -273,6 +294,7 @@ impl Catalog {
         match parent {
             Some(id) if id != library_id() => match self.item(id) {
                 Some(Item::Album(_)) => self.track_children(|t| t.album_id == Some(id)),
+                Some(Item::VirtualAlbum(album)) => album.entries.iter().filter_map(|entry| self.tracks.get(&entry.track_id)).map(Item::Track).collect(),
                 Some(Item::Artist(_)) => {
                     let mut items: Vec<Item<'_>> = self
                         .albums
@@ -299,6 +321,7 @@ impl Catalog {
         let mut items = vec![Item::Library(LIBRARY_NAME)];
         items.extend(self.artists.values().map(Item::Artist));
         items.extend(self.albums.values().map(Item::Album));
+        items.extend(self.virtual_albums.values().map(Item::VirtualAlbum));
         items.extend(self.playlists.values().map(Item::Playlist));
         items.extend(self.tracks.values().map(Item::Track));
         items
@@ -344,6 +367,7 @@ impl Catalog {
             Item::Album(album) => {
                 self.saved_albums.contains(&album.id) || !artist_ids.is_empty() || !album_artist_ids.is_empty()
             }
+            Item::VirtualAlbum(_) => true,
             Item::Artist(artist) => self.followed_artists.contains(&artist.id),
             _ => true,
         };

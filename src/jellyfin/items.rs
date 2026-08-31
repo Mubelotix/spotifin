@@ -87,6 +87,22 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
         .map(|filters| filters.split(',').any(|filter| filter.trim().eq_ignore_ascii_case("IsFavorite")))
         .unwrap_or(false);
 
+    // Virtual Spotify collections are metadata-only until their album page is
+    // opened. Fetching each backing playlist here keeps normal refreshes cheap.
+    if let Some(parent_id) = parent {
+        let sources = state.catalog.read().unwrap().virtual_albums.get(&parent_id).and_then(|album| {
+            (!album.loaded).then(|| album.source_uris.clone())
+        });
+        if let Some(sources) = sources {
+            for source in sources {
+                match crate::spotify::fetch_playlist(&state.bridge, &source).await {
+                    Ok(raw) => crate::spotify::absorb_virtual_playlist(&mut state.catalog.write().unwrap(), parent_id, &raw),
+                    Err(error) => eprintln!("virtual album fetch failed for {source}: {error}"),
+                }
+            }
+        }
+    }
+
     // Fetch an artist's complete discography before filtering, so artist pages
     // are not limited to saved albums or tracks previously seen by the server.
     for artist_id in &fetch_artist_ids {

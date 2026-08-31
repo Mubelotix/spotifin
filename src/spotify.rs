@@ -78,7 +78,43 @@ const COLLECT_JS: &str = r#"
         }));
     }
 
-    const out = { playlists: [], liked_tracks: [], albums: [], artists: [], errors: [] };
+    const out = { playlists: [], virtual_albums: [], liked_tracks: [], albums: [], artists: [], errors: [] };
+    const cardImage = a => {
+        for (let node = a; node; node = node.parentElement) {
+            const image = node.querySelector("header img")?.src || node.querySelector("img")?.src;
+            if (image) return image;
+        }
+        return null;
+    };
+    const readHomeLinks = () => [...document.querySelectorAll("a[href]")].map(a => ({
+        name: (a.innerText || "").trim(), href: a.href,
+        image: cardImage(a)
+    })).filter(x => x.href.includes("/playlist/"));
+    let homeLinks = readHomeLinks();
+    if (!homeLinks.some(x => /^Daily Mix \d+$/i.test(x.name))) {
+        const home = [...document.querySelectorAll("a,button,[role=button]")].find(x =>
+            /^(home|accueil)$/i.test((x.innerText || x.getAttribute("aria-label") || "").trim())
+        );
+        home?.click();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        homeLinks = readHomeLinks();
+    }
+    const uri = href => "spotify:playlist:" + href.split("/playlist/")[1].split(/[?#]/)[0];
+    const addVirtual = (name, links) => {
+        const sources = [...new Set(links.map(x => uri(x.href)))];
+        if (sources.length) out.virtual_albums.push({ name, sources, image: links.find(x => x.image)?.image || null });
+    };
+    for (const mix of homeLinks.filter(x => /^Daily Mix \d+$/i.test(x.name))) {
+        addVirtual(mix.name, [mix]);
+    }
+    addVirtual("Discover Weekly", homeLinks.filter(x => /^Discover Weekly$/i.test(x.name)));
+    for (const station of homeLinks.filter(x => / Radio$/i.test(x.name))) {
+        addVirtual(station.name, [station]);
+    }
+    const biggestHits = homeLinks.filter(x => /Today.?s Biggest Hits/i.test(x.name));
+    addVirtual("Today's Biggest Hits", biggestHits.length ? biggestHits : [
+        { href: "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" }
+    ]);
     const likedUris = [
         Spicetify.Platform.LibraryAPI._likedSongsUri,
         "spotify:user:me:collection",
@@ -394,6 +430,16 @@ fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
             catalog.followed_artists.insert(id);
         }
     }
+    for virtual_raw in array_of(raw.get("virtual_albums")) {
+        let Some(name) = str_field(virtual_raw, "name") else { continue };
+        let sources = array_of(virtual_raw.get("sources")).iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>();
+        if sources.is_empty() { continue; }
+        let id = catalog::stable_id(&format!("virtual-album:{name}"));
+        catalog.virtual_albums.insert(id, catalog::VirtualAlbum {
+            id, name: name.to_string(), image: image_of(virtual_raw.get("image")), source_uris: sources,
+            entries: Vec::new(), loaded: false,
+        });
+    }
     Ok(catalog)
 }
 
@@ -558,12 +604,23 @@ const MODIFY_JS: &str = r#"
 const DUMP_PLAYLIST_JS: &str = r#"
 (async () => {
     const uri = PLAYLIST_PLACEHOLDER;
-    const p = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri);
+    const pageSize = 200;
+    const p = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri, null,
+        { offset: 0, limit: pageSize });
+    const items = [...(p.contents?.items || [])];
+    const total = p.contents?.totalLength ?? p.metadata?.totalLength ?? items.length;
+    for (let offset = items.length; offset < total; offset += pageSize) {
+        const page = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri, null,
+            { offset, limit: pageSize });
+        const next = page.contents?.items || [];
+        if (!next.length) break;
+        items.push(...next);
+    }
     return JSON.stringify({
         uri,
         name: p.metadata?.name ?? null,
         image: (p.metadata?.images && p.metadata.images[0]?.url) || null,
-        tracks: (p.contents?.items || []).filter(t => t.type === "track").map(t => ({
+        tracks: items.filter(t => t.type === "track").map(t => ({
             uid: t.uid ?? null,
             uri: t.uri,
             name: t.name ?? null,
@@ -651,6 +708,29 @@ pub async fn fetch_playlist(bridge: &BridgeState, spotify_uri: &str) -> Result<V
 
 pub fn absorb_playlist(catalog: &mut Catalog, raw: &Value) {
     add_playlist(catalog, raw);
+}
+
+pub fn absorb_virtual_playlist(catalog: &mut Catalog, album_id: Uuid, raw: &Value) {
+    let empty = Vec::new();
+    let mut entries = Vec::new();
+    for (position, track_raw) in raw.get("tracks").and_then(Value::as_array).unwrap_or(&empty).iter().enumerate() {
+        if let Some(track_id) = add_track(catalog, track_raw) {
+            if catalog.virtual_albums.get(&album_id).is_some_and(|album| {
+                album.entries.iter().any(|entry| entry.track_id == track_id)
+            }) || entries.iter().any(|entry: &PlaylistEntry| entry.track_id == track_id) {
+                continue;
+            }
+            entries.push(PlaylistEntry {
+                id: catalog::stable_id(&format!("virtual:{album_id}:{position}:{track_id}")),
+                uid: None,
+                track_id,
+            });
+        }
+    }
+    if let Some(album) = catalog.virtual_albums.get_mut(&album_id) {
+        album.entries.extend(entries);
+        album.loaded = true;
+    }
 }
 
 #[cfg(test)]
