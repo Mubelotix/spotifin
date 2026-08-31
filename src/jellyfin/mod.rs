@@ -98,6 +98,7 @@ pub fn routes() -> Vec<Route> {
         playlists::get_playlist,
         playlists::update_playlist,
         playlists::delete_playlist,
+        playlists::delete_playlist_item,
         playlists::playlist_items,
         playlists::create_playlist,
         playlists::add_to_playlist,

@@ -100,6 +100,12 @@ pub async fn delete_playlist(playlist_id: Uuid, state: &State<AppState>) -> Resu
     Ok(Status::NoContent)
 }
 
+/// Jellify uses the generic item endpoint when deleting a playlist.
+#[delete("/Items/<playlist_id>")]
+pub async fn delete_playlist_item(playlist_id: Uuid, state: &State<AppState>) -> Result<Status, Status> {
+    delete_playlist(playlist_id, state).await
+}
+
 #[get("/Playlists/<playlist_id>/Items?<query..>")]
 pub async fn playlist_items(
     playlist_id: Uuid,
