@@ -1,14 +1,13 @@
 <h1 align="center">Spotifin</h1>
 
 <p align="center">
-  <strong>Spotify's catalog. Jellyfin's clients.</strong><br>
-  Turn a real Spotify desktop session into a beautiful, local Jellyfin music server.
+  <strong>Spotify's catalog. Jellyfin's API.</strong><br>
 </p>
 
 <p align="center">
-  <a href="https://spicetify.app/">Spicetify</a> for customization and ad blocking
+  <a href="https://spicetify.app/">Spicetify</a> for ad blocking
   &nbsp;&bull;&nbsp;
-  <a href="https://github.com/linuxserver/docker-baseimage-selkies">Selkies</a> for the streamed desktop
+  <a href="https://github.com/linuxserver/docker-baseimage-selkies">Selkies</a> for the desktop
   &nbsp;&bull;&nbsp;
   <a href="https://jellyfin.org/">Jellyfin</a> for the clients you already love
 </p>
@@ -16,6 +15,10 @@
 This software runs the official Spotify desktop client inside a container and hijacks it, so that it can expose the account's library through a Jellyfin-compatible server.
 
 Use existing open-source apps, or build new experiences on top of the open API.
+
+> [!WARNING]
+> Spotifin is an independent, unofficial project.
+> It is not affiliated with, endorsed by, sponsored by, or otherwise associated with Spotify AB or its subsidiaries.
 
 ## What You Get
 
