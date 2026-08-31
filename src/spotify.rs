@@ -327,6 +327,22 @@ const SEARCH_JS: &str = r#"
 const AUTOPLAY_JS: &str = r#"
 (async () => {
     const seed = SEED_PLACEHOLDER;
+    const readQueue = () => new Promise(resolve => {
+        let latest = null;
+        let request = null;
+        const finish = () => {
+            if (request?.cancel) request.cancel();
+            resolve(latest);
+        };
+        setTimeout(finish, 500);
+        try {
+            request = Spicetify.Platform.PlayerAPI._contextPlayer.getQueue({}, queue => {
+                latest = queue;
+            });
+        } catch (e) {
+            finish();
+        }
+    });
     if (seed) {
         const station = seed.startsWith("spotify:track:")
             ? "spotify:station:track:" + seed.slice("spotify:track:".length)
@@ -335,38 +351,18 @@ const AUTOPLAY_JS: &str = r#"
         // The station may expose its first item before its recommendation page
         // has been materialized in either queue representation.
         // Stay below Wavio's 15-second Jellyfin request timeout.
-        for (let attempt = 0; attempt < 16; attempt++) {
+        for (let attempt = 0; attempt < 12; attempt++) {
             const currentUri = Spicetify.Player.data?.item?.uri;
-            const queue = await new Promise(resolve => {
-                let settled = false;
-                const finish = value => {
-                    if (settled) return;
-                    settled = true;
-                    resolve(value);
-                };
-                setTimeout(() => finish(null), 250);
-                try { Spicetify.Platform.PlayerAPI._contextPlayer.getQueue({}, finish); }
-                catch (e) { finish(null); }
-            });
+            const queue = await readQueue();
             const hasDifferentTrack = queue?.nextTracks?.some(entry =>
                 entry.contextTrack?.uri?.startsWith("spotify:track:") &&
                 entry.contextTrack.uri !== currentUri);
             if (hasDifferentTrack) break;
-            await new Promise(resolve => setTimeout(resolve, 250));
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
     }
     const current = Spicetify.Player.data?.item;
-    const queue = await new Promise(resolve => {
-        let settled = false;
-        const finish = value => {
-            if (settled) return;
-            settled = true;
-            resolve(value);
-        };
-        setTimeout(() => finish(null), 1000);
-        try { Spicetify.Platform.PlayerAPI._contextPlayer.getQueue({}, finish); }
-        catch (e) { finish(null); }
-    });
+    const queue = await readQueue();
     const contextNext = (queue?.nextTracks || []).map(entry => {
         const t = entry.contextTrack;
         const m = t?.metadata || {};
