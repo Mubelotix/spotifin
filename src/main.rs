@@ -7,6 +7,7 @@ use rocket::{
     response::{Responder, Response},
     routes, State,
 };
+use rocket_ws::{Message, Stream, WebSocket};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     time::sleep,
@@ -141,6 +142,20 @@ fn health() -> Status {
     Status::Ok
 }
 
+#[get("/ws")]
+fn ws(ws: WebSocket) -> Stream![] {
+    Stream! { ws =>
+        for await message in ws {
+            match message? {
+                Message::Text(text) => yield Message::Text(format!("ack:{text}")),
+                Message::Ping(payload) => yield Message::Pong(payload),
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+    }
+}
+
 #[rocket::launch]
 async fn rocket() -> _ {
     let root = data_dir();
@@ -161,7 +176,8 @@ async fn rocket() -> _ {
             playlist,
             segment,
             relative_segment,
-            health
+            health,
+            ws
         ],
     )
 }

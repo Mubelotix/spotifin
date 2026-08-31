@@ -31,7 +31,7 @@ podman build -t spicetify-web .
 
 Plugins are configured with env vars in `run-spotify.sh` (space-separated lists), applied by the init script at every boot:
 
-- `SPICETIFY_EXTENSIONS` (default `adblock.js` — auto-downloaded from rxri/spicetify-extensions)
+- `SPICETIFY_EXTENSIONS` (default `adblock.js bridge.js`; `adblock.js` is auto-downloaded from rxri/spicetify-extensions, project extensions like `bridge.js` are COPY'd into `/opt/spicetify/Extensions/` at build time and installed by the init script)
 - `SPICETIFY_CUSTOM_APPS` (e.g. `lyrics-plus new-releases`)
 - `SPICETIFY_THEME`
 
@@ -60,7 +60,7 @@ Built-in extensions are in `/opt/spicetify/Extensions/`, custom apps in `/opt/sp
 - Spotify Daily playlists and all Spotify playlists visible on the Spotify home page should be available to Jellyfin clients. Prefer representing them as classic playlists if Instant Mix cannot provide multiple separate mixes.
 - Lyrics are available through Spotify's interface using the microphone button.
 - Audio is known to stream through the Selkies interface when Spotify is playing inside the container. The audio recording/streaming location is undecided: it may be in the Spicetify extension, in the Rust backend, or outside the container, and may use the Selkies API itself.
-- A Rust backend is acceptable and will open the HTTP port, answer HTTP requests, and communicate with the Spicetify extension through a WebSocket.
+- A Rust backend is acceptable and will open the HTTP port, answer HTTP requests, and communicate with the Spicetify extension through a WebSocket. The extension is `bridge.js`; it connects to `ws://127.0.0.1:8000/ws` (Rocket `rocket_ws` route) and reconnects every 2s until the link comes back.
 
 ## Hard-won container lessons
 

@@ -3,7 +3,8 @@
 # Session/config Spotify persistées dans ./data
 #
 # Plugins spicetify via env vars (listes séparées par des espaces) :
-#   SPICETIFY_EXTENSIONS  (défaut: "adblock.js", téléchargé automatiquement)
+#   SPICETIFY_EXTENSIONS  (défaut: "adblock.js bridge.js"; adblock téléchargé
+#                         automatiquement, bridge.js est embarqué dans l'image)
 #   SPICETIFY_CUSTOM_APPS (défaut: aucun, ex: "lyrics-plus new-releases")
 #   SPICETIFY_THEME       (défaut: aucun)
 DATA_DIR="$(cd "$(dirname "$0")" && pwd)/data"
@@ -13,7 +14,7 @@ podman run -d --replace --name spotify \
     -e PUID=1000 -e PGID=1000 \
     -e TZ="$(cat /etc/timezone 2>/dev/null || echo Europe/Paris)" \
     -e CUSTOM_USER=spotify -e PASSWORD=spotify \
-    -e SPICETIFY_EXTENSIONS="${SPICETIFY_EXTENSIONS:-adblock.js}" \
+    -e SPICETIFY_EXTENSIONS="${SPICETIFY_EXTENSIONS:-adblock.js bridge.js}" \
     -e SPICETIFY_CUSTOM_APPS="${SPICETIFY_CUSTOM_APPS:-}" \
     -e SPICETIFY_THEME="${SPICETIFY_THEME:-}" \
     --device /dev/dri \

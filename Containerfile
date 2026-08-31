@@ -26,6 +26,10 @@ RUN curl -fsSL -o /tmp/spicetify.tar.gz \
     && rm /tmp/spicetify.tar.gz \
     && ln -s /opt/spicetify/spicetify /usr/local/bin/spicetify
 
+# Project extensions shipped with the image (installed into the spicetify
+# config dir by the init script when listed in SPICETIFY_EXTENSIONS).
+COPY bridge.js /opt/spicetify/Extensions/bridge.js
+
 # Openbox autostart: clean stale Chromium/crashpad locks (silent crash otherwise),
 # then launch Spotify inside a D-Bus session (no session bus = 100% CPU busy loop)
 RUN printf '%s\n' \
@@ -69,11 +73,16 @@ RUN mkdir -p /custom-cont-init.d \
         'WANT_EXT=$(join $SPICETIFY_EXTENSIONS)' \
         'WANT_APPS=$(join $SPICETIFY_CUSTOM_APPS)' \
         'WANT_THEME="$SPICETIFY_THEME"' \
-        'case " $SPICETIFY_EXTENSIONS " in' \
-        '    *" adblock.js "*)' \
-        '        [ -f "$SPICETIFY_CONFIG/Extensions/adblock.js" ] || curl -fsSL -o "$SPICETIFY_CONFIG/Extensions/adblock.js" https://raw.githubusercontent.com/rxri/spicetify-extensions/main/adblock/adblock.js || true' \
-        '        ;;' \
-        'esac' \
+        'for ext in $SPICETIFY_EXTENSIONS; do' \
+        '    case "$ext" in' \
+        '        adblock.js)' \
+        '            [ -f "$SPICETIFY_CONFIG/Extensions/adblock.js" ] || curl -fsSL -o "$SPICETIFY_CONFIG/Extensions/adblock.js" https://raw.githubusercontent.com/rxri/spicetify-extensions/main/adblock/adblock.js || true' \
+        '            ;;' \
+        '        *)' \
+        '            if [ -f "/opt/spicetify/Extensions/$ext" ]; then cp "/opt/spicetify/Extensions/$ext" "$SPICETIFY_CONFIG/Extensions/$ext"; fi' \
+        '            ;;' \
+        '    esac' \
+        'done' \
         'CHANGED=0' \
         'for kv in "extensions $WANT_EXT" "custom_apps $WANT_APPS" "theme $WANT_THEME"; do' \
         '    k=${kv%% *}; v=${kv#* }' \
@@ -83,6 +92,8 @@ RUN mkdir -p /custom-cont-init.d \
         '        CHANGED=1' \
         '    fi' \
         'done' \
+        'APPLIED_DIR=/usr/share/spotify/Apps/xpui/extensions' \
+        'for ext in $SPICETIFY_EXTENSIONS; do if [ ! -f "$APPLIED_DIR/$ext" ]; then echo "$ext missing from applied app, forcing apply"; CHANGED=1; fi; done' \
         'chown -R abc:abc "$SPICETIFY_CONFIG" 2>/dev/null || true' \
         'if [ "$CHANGED" = 1 ]; then' \
         '    su abc -s /bin/bash -c "HOME=$SPICETIFY_HOME SPICETIFY_CONFIG=$SPICETIFY_CONFIG spicetify apply" || true' \
