@@ -236,7 +236,7 @@ pub async fn prepare(
         return false;
     }
     let requested = *state.player.inner.requested_item.lock().await;
-    if requested.is_some_and(|requested| requested != item_id) {
+    if probe && requested.is_some_and(|requested| requested != item_id) {
         return false;
     }
     let still_capturing = state
