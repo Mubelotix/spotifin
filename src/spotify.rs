@@ -50,13 +50,14 @@ const COLLECT_JS: &str = r#"
         return {
             uri: a.uri ?? uri,
             name: a.name ?? fallbackName ?? "Album",
-            year: a.date?.year ?? null,
+            year: a.date?.year ?? (a.date?.isoString ? Number(a.date.isoString.slice(0, 4)) : null),
             image,
             artists: (a.artists?.items || []).map(x => ({ uri: x.uri ?? null, name: x.name ?? null })),
             tracks: (a.tracksV2?.items || []).filter(i => i.track).map(i => ({
                 uri: i.track.uri,
                 name: i.track.name ?? null,
-                album: { uri, name: a.name ?? fallbackName ?? null, image },
+                album: { uri, name: a.name ?? fallbackName ?? null, image,
+                    year: a.date?.year ?? null },
                 artists: (i.track.artists?.items || []).map(x => ({ uri: x.uri ?? null, name: x.name ?? null })),
                 ms: i.track.duration?.totalMilliseconds ?? i.track.duration?.milliseconds ?? null,
                 disc: i.track.discNumber ?? 0,
@@ -271,7 +272,13 @@ pub async fn load_cached_album(cache_dir: &Path, album_uri: &str) -> Option<Vec<
     let path = cache_dir.join(format!("album-{id}.json"));
     let raw = tokio::fs::read_to_string(path).await.ok()?;
     let value = serde_json::from_str::<Value>(&raw).ok()?;
-    Some(value.get("tracks")?.as_array()?.clone())
+    let tracks = value.get("tracks")?.as_array()?.clone();
+    // Older caches omitted release years from the embedded album metadata.
+    // Refetch those albums once so clients can display the release year.
+    tracks
+        .iter()
+        .any(|track| track.get("album").and_then(|album| album.get("year")).and_then(Value::as_i64).is_some())
+        .then_some(tracks)
 }
 
 /// Persists the complete artist discography fetched from Spotify. Artist
@@ -409,7 +416,8 @@ const ARTIST_TRACKS_JS: &str = r#"
                 uri: track.uri,
                 name: track.name ?? null,
                 album: { uri: album.uri ?? release.uri, name: album.name ?? release.name, image,
-                    year: release.date?.year ?? album.date?.year ?? null },
+                    year: release.date?.year ?? (release.date?.isoString ? Number(release.date.isoString.slice(0, 4)) : null)
+                        ?? album.date?.year ?? (album.date?.isoString ? Number(album.date.isoString.slice(0, 4)) : null) },
                 artists: (track.artists?.items || []).map(a => ({
                     uri: a.uri ?? null, name: a.profile?.name ?? a.name ?? null
                 })),
@@ -454,7 +462,7 @@ const ALBUM_TRACKS_JS: &str = r#"
         uri: row.track.uri,
         name: row.track.name ?? null,
         album: { uri: album.uri ?? ALBUM_URI_PLACEHOLDER, name: album.name ?? null, image,
-            year: album.date?.year ?? null },
+            year: album.date?.year ?? (album.date?.isoString ? Number(album.date.isoString.slice(0, 4)) : null) },
         artists: (row.track.artists?.items || []).map(a => ({
             uri: a.uri ?? null, name: a.profile?.name ?? a.name ?? null
         })),
@@ -983,7 +991,7 @@ mod tests {
         let tracks = vec![serde_json::json!({
             "uri": "spotify:track:cached-album-track",
             "name": "Cached album track",
-            "album": { "uri": "spotify:album:cached-album", "name": "Cached album", "image": null },
+            "album": { "uri": "spotify:album:cached-album", "name": "Cached album", "image": null, "year": 2024 },
             "artists": [],
             "ms": 1000,
             "disc": 1,
