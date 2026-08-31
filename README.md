@@ -2,24 +2,24 @@
 
 | Feature | Finamp | Fintunes | Yuzic | CassetteCat | Wavio | Linthra | Coppelia | JellyBoxPlayer |
 |---|---|---|---|---|---|---|---|---|
-| Login | ✅ | ✅ |  |  |  |  |  |  |
-| View library | ✅ | ✅ |  |  |  |  |  |  |
-| View artist | ✅ | ⚠️ Saved content only |  |  |  |  |  |  |
-| View album | ✅ | ⚠️ From search |  |  |  |  |  |  |
-| Search | ⚠️ Only songs | ✅ |  |  |  |  |  |  |
-| Play an uncached track | ✅ | ✅ |  |  |  |  |  |  |
-| Play a cached track | ✅ | ✅ |  |  |  |  |  |  |
-| Download tracks | ✅ | ✅ |  |  |  |  |  |  |
-| Autoplay | ✅ | ⚠️ From search |  |  |  |  |  |  |
-| Skip tracks | ✅ | ✅ |  |  |  |  |  |  |
-| Seek forward and backward | ✅ | ✅ |  |  |  |  |  |  |
-| Like/Unlike | ✅ | ✖️ |  |  |  |  |  |  |
-| Create a playlist | ✅ | ✖️ |  |  |  |  |  |  |
-| Edit playlist content | ✅ | ✖️ |  |  |  |  |  |  |
-| Remove playlist | ✖️ | ✖️ |  |  |  |  |  |  |
-| Display lyrics | ✖️ | ✅ |  |  |  |  |  |  |
-| Follow artist | ✅ | ⚠️ Saved content only |  |  |  |  |  |  |
-| Save album | ✅ | ✖️ |  |  |  |  |  |  |
+| Login | ✅ | ✅ | ✅ |  |  |  |  |  |
+| View library | ✅ | ✅ | ✅ |  |  |  |  |  |
+| View artist | ✅ | ⚠️ Saved content only | ⚠️ Saved content only |  |  |  |  |  |
+| View album | ✅ | ⚠️ From search | ⚠️ Saved content only |  |  |  |  |  |
+| Search | ⚠️ Only songs | ✅ | ⚠️ Only songs |  |  |  |  |  |
+| Play an uncached track | ✅ | ✅ | ✅ |  |  |  |  |  |
+| Play a cached track | ✅ | ✅ | ✅ |  |  |  |  |  |
+| Download tracks | ✅ | ✅ Whole albums | ✅ Whole album or artist |  |  |  |  |  |
+| Autoplay | ✅ | ⚠️ From search | ✅ |  |  |  |  |  |
+| Skip tracks | ✅ | ✅ | ✅ |  |  |  |  |  |
+| Seek forward and backward | ✅ | ✅ | ✅ |  |  |  |  |  |
+| Like/Unlike | ✅ | ✖️ | ✅ |  |  |  |  |  |
+| Create a playlist | ✅ | ✖️ | ✅ |  |  |  |  |  |
+| Edit playlist content | ✅ | ✖️ | ✅ |  |  |  |  |  |
+| Remove playlist | ✖️ | ✖️ | ✅ |  |  |  |  |  |
+| Display lyrics | ✖️ | ✅ | ✅ |  |  |  |  |  |
+| Follow artist | ✅ | ⚠️ Saved content only | ✖️ |  |  |  |  |  |
+| Save album | ✅ | ✖️ | ✖️ |  |  |  |  |  |
 
 ### Legend
 
