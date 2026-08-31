@@ -349,6 +349,7 @@ user-context variant. Relevant fields:
   "PlaybackPositionTicks": 123000000,
   "PlayCount": 4,
   "IsFavorite": true,
+  "Likes": true,
   "Played": false,
   "LastPlayedDate": "2026-01-01T12:00:00Z",
   "Rating": 8.0,
@@ -367,6 +368,7 @@ endpoints, but a complete implementation should accept:
 - `IsFavorite`
 - `Played`
 - `Rating`
+- `Likes` (`true` for thumbs-up, `false` for thumbs-down, omitted/null to clear)
 - `LastPlayedDate`
 
 ### Favorite endpoints
@@ -375,6 +377,15 @@ Finamp uses these convenience mutations:
 
 - `POST /Users/{userId}/FavoriteItems/{itemId}` marks an item favorite.
 - `DELETE /Users/{userId}/FavoriteItems/{itemId}` removes the favorite.
+
+Modern clients use the equivalent `/UserFavoriteItems/{itemId}` routes. In
+Jellyfin, a favorite is the heart/save state (`IsFavorite`), not a dislike.
+Thumbs-up and thumbs-down are the nullable `Likes` field, changed with
+`POST /UserItems/{itemId}/Rating?likes=true|false` and cleared with
+`DELETE /UserItems/{itemId}/Rating` (legacy user-prefixed aliases also exist).
+For this Spotify-backed server, `IsFavorite` mirrors Spotify's Liked Songs;
+`Likes=false` is retained as Jellyfin-local metadata because Spotify has no
+corresponding library state exposed by the client bridge.
 
 Return the updated `UserItemDataDto` if possible. The client uses
 `IsFavorite`, `PlayCount`, `PlaybackPositionTicks`, and `LastPlayedDate`.

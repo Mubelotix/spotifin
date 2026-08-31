@@ -34,11 +34,11 @@ COPY bridge.js /opt/spicetify/Extensions/bridge.js
 # then launch Spotify inside a D-Bus session (no session bus = 100% CPU busy loop)
 RUN printf '%s\n' \
         '#!/bin/bash' \
-        'exec 9>/tmp/spotify-autostart.lock' \
-        'flock -n 9 || exit 0' \
+        'if mkdir /tmp/spotify-backend.lock 2>/dev/null; then ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server >> /tmp/backend-live.log 2>&1 & fi' \
+        'for _ in {1..10}; do if pgrep -u abc -x spotify >/dev/null 2>&1; then exit 0; fi; sleep 1; done' \
+        'if ! mkdir /tmp/spotify-autostart.lock 2>/dev/null; then exit 0; fi' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
-        'ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server >> /tmp/backend-live.log 2>&1 &' \
         'exec dbus-launch --exit-with-session spotify --no-sandbox --disable-dev-shm-usage' \
         > /defaults/autostart \
     && chmod +x /defaults/autostart
@@ -101,6 +101,7 @@ RUN mkdir -p /custom-cont-init.d \
         'if [ "$CHANGED" = 1 ]; then' \
         '    su abc -s /bin/bash -c "HOME=$SPICETIFY_HOME SPICETIFY_CONFIG=$SPICETIFY_CONFIG spicetify apply" || true' \
         'fi' \
+        'pkill -u abc -x spotify 2>/dev/null || true' \
         > /custom-cont-init.d/50-spicetify-init.sh \
     && chmod +x /custom-cont-init.d/50-spicetify-init.sh
 

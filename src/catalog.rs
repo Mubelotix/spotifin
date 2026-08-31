@@ -142,6 +142,7 @@ pub struct Catalog {
     /// Artists the user follows; the only ones listed as browsable.
     pub followed_artists: HashSet<Uuid>,
     favorites: HashSet<Uuid>,
+    likes: HashMap<Uuid, bool>,
     play_counts: HashMap<Uuid, u32>,
     /// Last reported playback position in ticks; the Spotify client owns the
     /// real cursor, we only remember what clients tell us.
@@ -158,7 +159,10 @@ impl Catalog {
     /// favorites, play counts, and dynamically ingested items (e.g. search
     /// results) that the collector does not know about.
     pub fn merge(&mut self, mut fresh: Catalog) {
-        fresh.favorites = std::mem::take(&mut self.favorites);
+        let old_favorites = std::mem::take(&mut self.favorites);
+        fresh.favorites.extend(old_favorites.into_iter().filter(|id| !fresh.tracks.contains_key(id)));
+        let old_likes = std::mem::take(&mut self.likes);
+        fresh.likes.extend(old_likes.into_iter().filter(|(id, _)| !fresh.tracks.contains_key(id)));
         fresh.play_counts = std::mem::take(&mut self.play_counts);
         fresh.positions = std::mem::take(&mut self.positions);
         fresh.last_played = std::mem::take(&mut self.last_played);
@@ -202,6 +206,18 @@ impl Catalog {
         }
     }
 
+    pub fn likes(&self, id: Uuid) -> Option<bool> {
+        self.likes.get(&id).copied()
+    }
+
+    pub fn set_likes(&mut self, id: Uuid, likes: Option<bool>) {
+        if let Some(likes) = likes {
+            self.likes.insert(id, likes);
+        } else {
+            self.likes.remove(&id);
+        }
+    }
+
     pub fn play_count(&self, id: Uuid) -> u32 {
         self.play_counts.get(&id).copied().unwrap_or(0)
     }
@@ -237,9 +253,9 @@ impl Catalog {
     }
 
     /// Direct children of `parent`; with the whole catalog when recursive.
-    pub fn query(&self, types: &[&str], parent: Option<Uuid>, search: Option<&str>) -> Vec<Item<'_>> {
+    pub fn query(&self, types: &[&str], parent: Option<Uuid>, search: Option<&str>, favorites_only: bool) -> Vec<Item<'_>> {
         let mut items = self.candidate_items(parent);
-        items.retain(|item| self.matches(item, types, parent, search));
+        items.retain(|item| self.matches(item, types, parent, search, favorites_only));
         items.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
         items
     }
@@ -286,7 +302,7 @@ impl Catalog {
             .collect()
     }
 
-    fn matches(&self, item: &Item<'_>, types: &[&str], parent: Option<Uuid>, search: Option<&str>) -> bool {
+    fn matches(&self, item: &Item<'_>, types: &[&str], parent: Option<Uuid>, search: Option<&str>, favorites_only: bool) -> bool {
         if matches!(item, Item::Library(_)) && parent.is_some() {
             return false;
         }
@@ -301,6 +317,9 @@ impl Catalog {
             _ => true,
         };
         if !listed {
+            return false;
+        }
+        if favorites_only && !self.is_favorite(item.id()) {
             return false;
         }
         match search {

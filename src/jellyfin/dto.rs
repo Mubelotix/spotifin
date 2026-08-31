@@ -30,7 +30,9 @@ pub struct ImageTags {
 #[serde(rename_all = "PascalCase")]
 pub struct UserItemData {
     pub item_id: Uuid,
+    pub key: String,
     pub is_favorite: bool,
+    pub likes: Option<bool>,
     pub played: bool,
     pub play_count: u32,
     pub playback_position_ticks: u64,
@@ -69,7 +71,9 @@ pub fn user_data(catalog: &Catalog, id: Uuid) -> UserItemData {
     let count = catalog.play_count(id);
     UserItemData {
         item_id: id,
+        key: id.to_string(),
         is_favorite: catalog.is_favorite(id),
+        likes: catalog.likes(id),
         played: count > 0,
         play_count: count,
         playback_position_ticks: catalog.position_ticks(id),

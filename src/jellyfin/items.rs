@@ -17,6 +17,8 @@ pub struct ItemQuery {
     parent_id: Option<String>,
     #[field(name = "SearchTerm")]
     search_term: Option<String>,
+    #[field(name = "Filters")]
+    filters: Option<String>,
     #[field(name = "StartIndex")]
     start_index: Option<usize>,
     #[field(name = "Limit")]
@@ -54,6 +56,11 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
     let types = parse_types(query.include_item_types.clone());
     let parent = query.parent_id.as_deref().and_then(|raw| Uuid::parse_str(raw).ok());
     let search = query.search_term.as_deref().unwrap_or_default();
+    let favorites_only = query
+        .filters
+        .as_deref()
+        .map(|filters| filters.split(',').any(|filter| filter.trim().eq_ignore_ascii_case("IsFavorite")))
+        .unwrap_or(false);
 
     // Remote results are ingested before the local pass so they participate
     // in filtering, sorting and pagination exactly like library items.
@@ -72,7 +79,7 @@ async fn run_query(state: &AppState, query: ItemQuery) -> QueryResult<BaseItemDt
 
     let catalog = state.catalog.read().unwrap();
     let term = if search.is_empty() { None } else { Some(search) };
-    let found = catalog.query(&types, parent, term);
+    let found = catalog.query(&types, parent, term, favorites_only);
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
     let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();
@@ -121,7 +128,7 @@ type MaybeItem = Result<Json<BaseItemDto>, Status>;
 async fn artist_index(query: ItemQuery, state: &State<AppState>) -> Json<QueryResult<BaseItemDto>> {
     let catalog = state.catalog.read().unwrap();
     let term = query.search_term.as_deref().filter(|term| !term.is_empty());
-    let found = catalog.query(&["MusicArtist"], None, term);
+    let found = catalog.query(&["MusicArtist"], None, term, false);
     let start = query.start_index.unwrap_or(0);
     let (items, total) = page(found, start, query.limit);
     let dtos = items.iter().map(|item| base_item(&catalog, item, None)).collect();

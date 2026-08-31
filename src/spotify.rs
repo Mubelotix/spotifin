@@ -10,7 +10,7 @@ use crate::catalog::{self, Album, Artist, Catalog, Playlist, PlaylistEntry, Trac
 /// renderer, so it is the client querying its own backend.
 const COLLECT_JS: &str = r#"
 (async () => {
-    async function dumpPlaylist(uri, fallbackName) {
+    async function dumpPlaylist(uri, fallbackName, liked = false) {
         const pageSize = 200;
         const first = await Spicetify.Platform.PlaylistAPI.getPlaylist(uri, null,
             { offset: 0, limit: pageSize });
@@ -26,6 +26,7 @@ const COLLECT_JS: &str = r#"
         return {
             uri,
             name: first.metadata?.name ?? fallbackName ?? "Playlist",
+            liked,
             image: (first.metadata?.images && first.metadata.images[0]?.url) || null,
             tracks: items.filter(t => t.type === "track").map(t => ({
                 uid: t.uid ?? null,
@@ -90,7 +91,7 @@ const COLLECT_JS: &str = r#"
     ].filter((uri, index, all) => uri && all.indexOf(uri) === index);
     for (const uri of likedUris) {
         try {
-            const liked = await dumpPlaylist(uri, "Liked Songs");
+            const liked = await dumpPlaylist(uri, "Liked Songs", true);
             if (liked.tracks.length || uri === likedUris[likedUris.length - 1]) {
                 liked.name = "Liked Songs";
                 out.playlists.push(liked);
@@ -269,10 +270,36 @@ pub async fn lyrics(bridge: &BridgeState, track_uri: &str) -> Result<Vec<Lyric>,
         .collect())
 }
 
+const SET_FAVORITE_JS: &str = r#"
+(async () => {
+    const uri = URI_PLACEHOLDER;
+    const api = Spicetify.Platform.LibraryAPI;
+    const method = LIKED_PLACEHOLDER ? api.add : api.remove;
+    if (typeof method !== "function") throw new Error("Spotify LibraryAPI favorite method unavailable");
+    await method.call(api, { uris: [uri] });
+    return "ok";
+})()
+"#;
+
+pub async fn set_favorite(bridge: &BridgeState, uri: &str, favorite: bool) -> Result<(), String> {
+    let code = SET_FAVORITE_JS
+        .replace("URI_PLACEHOLDER", &serde_json::to_string(uri).map_err(|e| e.to_string())?)
+        .replace("LIKED_PLACEHOLDER", if favorite { "true" } else { "false" });
+    eval_on_bridge(bridge, code).await.map_err(|e| format!("favorite update failed: {e}"))?;
+    Ok(())
+}
+
 fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
     let mut catalog = Catalog::new();
     for playlist in array_of(raw.get("playlists")) {
         add_playlist(&mut catalog, playlist);
+        if playlist.get("liked").and_then(Value::as_bool) == Some(true) {
+            for track in array_of(playlist.get("tracks")) {
+                if let Some(uri) = str_field(track, "uri") {
+                    catalog.set_favorite(catalog::stable_id(uri), true);
+                }
+            }
+        }
     }
     for album in array_of(raw.get("albums")) {
         add_saved_album(&mut catalog, album);
