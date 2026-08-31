@@ -48,7 +48,7 @@ pub async fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<
     Some(Json(serde_json::json!({
         "Id": playlist.id,
         "Name": playlist.name,
-        "OpenAccess": false,
+        "OpenAccess": playlist.is_public,
         "Shares": [],
         "ItemIds": catalog.playlist_tracks(playlist).iter().map(|t| t.id()).collect::<Vec<_>>(),
     })))
@@ -58,6 +58,8 @@ pub async fn get_playlist(playlist_id: Uuid, state: &State<AppState>) -> Option<
 #[post("/Playlists/<playlist_id>", format = "json", data = "<body>")]
 pub async fn update_playlist(playlist_id: Uuid, body: Json<Value>, state: &State<AppState>) -> Result<Status, Status> {
     let name = body.0.get("Name").and_then(Value::as_str).map(str::to_string);
+    let is_public = body.0.get("IsPublic").and_then(Value::as_bool);
+    let has_ids = body.0.get("Ids").is_some();
     let ids = body
         .0
         .get("Ids")
@@ -74,7 +76,15 @@ pub async fn update_playlist(playlist_id: Uuid, body: Json<Value>, state: &State
     if let Some(name) = name {
         spotify::rename_playlist(&state.bridge, &uri, &name).await.map_err(|_| Status::BadGateway)?;
     }
-    spotify::replace_playlist(&state.bridge, &uri, &track_uris).await.map_err(|_| Status::BadGateway)?;
+    if has_ids {
+        spotify::replace_playlist(&state.bridge, &uri, &track_uris).await.map_err(|_| Status::BadGateway)?;
+    }
+    if let Some(is_public) = is_public {
+        spotify::set_playlist_public(&state.bridge, &uri, is_public).await.map_err(|_| Status::BadGateway)?;
+        if let Some(playlist) = state.catalog.write().unwrap().playlists.get_mut(&playlist_id) {
+            playlist.is_public = is_public;
+        }
+    }
     resync(state, playlist_id).await;
     Ok(Status::NoContent)
 }
@@ -141,24 +151,45 @@ pub struct PageQuery {
     limit: Option<usize>,
 }
 
+#[derive(FromForm)]
+pub struct CreatePlaylistQuery {
+    #[field(name = "name")]
+    name: Option<String>,
+    #[field(name = "ids")]
+    ids: Option<String>,
+}
+
 /// Creates the playlist inside Spotify itself; the returned URI is the
-/// canonical identity of the new playlist.
-#[post("/Playlists", format = "json", data = "<body>")]
-pub async fn create_playlist(body: Json<Value>, state: &State<AppState>) -> Result<Json<Value>, Status> {
-    let name = body.0.get("Name").and_then(Value::as_str).unwrap_or("New playlist").to_string();
+/// canonical identity of the new playlist. Wavio sends the fields as query
+/// parameters, while other clients send a JSON body.
+#[post("/Playlists?<query..>", format = "json", data = "<body>")]
+pub async fn create_playlist(
+    query: CreatePlaylistQuery,
+    body: Option<Json<Value>>,
+    state: &State<AppState>,
+) -> Result<Json<Value>, Status> {
+    let body = body.as_ref().map(|body| &body.0);
+    let name = body
+        .and_then(|body| body.get("Name"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or(query.name)
+        .unwrap_or_else(|| "New playlist".to_string());
     let initial_ids = body
-        .0
-        .get("Ids")
+        .and_then(|body| body.get("Ids"))
         .and_then(Value::as_array)
         .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>())
+        .or_else(|| query.ids.map(|ids| ids.split(',').map(str::to_string).filter(|id| !id.is_empty()).collect()))
         .unwrap_or_default();
     let uri = spotify::create_playlist(&state.bridge, &name).await.map_err(|_| Status::BadGateway)?;
+    spotify::set_playlist_public(&state.bridge, &uri, false).await.map_err(|_| Status::BadGateway)?;
     let id = catalog::stable_id(&uri);
     {
         let mut catalog = state.catalog.write().unwrap();
         let playlist = Playlist {
             id,
             name: name.clone(),
+            is_public: false,
             image: None,
             spotify_uri: Some(uri.clone()),
             source_uris: Vec::new(),

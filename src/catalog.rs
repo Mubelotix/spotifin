@@ -55,6 +55,8 @@ pub struct PlaylistEntry {
 pub struct Playlist {
     pub id: Uuid,
     pub name: String,
+    /// Jellyfin visibility flag; playlists are private by default.
+    pub is_public: bool,
     pub image: Option<String>,
     /// Spotify URI for client-backed playlists; None for ephemeral ones.
     pub spotify_uri: Option<String>,

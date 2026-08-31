@@ -676,7 +676,7 @@ fn parse_catalog(raw: &Value) -> Result<Catalog, String> {
         if sources.is_empty() { continue; }
         let id = catalog::stable_id(&format!("virtual-playlist:{name}"));
         catalog.playlists.insert(id, Playlist {
-            id, name: name.to_string(), image: image_of(virtual_raw.get("image")), spotify_uri: None,
+            id, name: name.to_string(), is_public: false, image: image_of(virtual_raw.get("image")), spotify_uri: None,
             source_uris: sources, loaded: false, entries: Vec::new(),
         });
     }
@@ -749,9 +749,11 @@ pub(crate) fn add_playlist(catalog: &mut Catalog, raw: &Value) {
             });
         }
     }
+    let is_public = catalog.playlists.get(&id).map(|playlist| playlist.is_public).unwrap_or(false);
     catalog.playlists.insert(id, Playlist {
         id,
         name: str_field(raw, "name").unwrap_or("Unnamed playlist").to_string(),
+        is_public,
         image: image_of(raw.get("image")),
         spotify_uri: Some(uri.to_string()),
         source_uris: Vec::new(),
@@ -887,6 +889,19 @@ const UPDATE_DETAILS_JS: &str = r#"
 })()
 "#;
 
+const UPDATE_VISIBILITY_JS: &str = r#"
+(async () => {
+    const uri = PLAYLIST_PLACEHOLDER;
+    const permission = PUBLIC_PLACEHOLDER ? 2 : 1;
+    const permissionMessage = new Uint8Array([8, permission, 16, 232, 7]);
+    await Spicetify.Platform.PlaylistAPI._playlistServiceClient.setBasePermission({
+        uris: [uri],
+        permission: permissionMessage
+    });
+    return "ok";
+})()
+"#;
+
 /// Fetches one playlist in the collector's raw shape so `add_playlist` can
 /// absorb it verbatim.
 const DUMP_PLAYLIST_JS: &str = r#"
@@ -942,6 +957,13 @@ pub async fn rename_playlist(bridge: &BridgeState, spotify_uri: &str, name: &str
     let code = UPDATE_DETAILS_JS
         .replace("PLAYLIST_PLACEHOLDER", &playlist_uri_literal(spotify_uri))
         .replace("NAME_PLACEHOLDER", &serde_json::to_string(name).map_err(|e| e.to_string())?);
+    eval_string(bridge, code).await.map(|_| ())
+}
+
+pub async fn set_playlist_public(bridge: &BridgeState, spotify_uri: &str, is_public: bool) -> Result<(), String> {
+    let code = UPDATE_VISIBILITY_JS
+        .replace("PLAYLIST_PLACEHOLDER", &playlist_uri_literal(spotify_uri))
+        .replace("PUBLIC_PLACEHOLDER", if is_public { "true" } else { "false" });
     eval_string(bridge, code).await.map(|_| ())
 }
 

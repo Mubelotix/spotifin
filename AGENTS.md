@@ -75,8 +75,9 @@ Spicetify plugins are env vars on `run-spotify.sh`: `SPICETIFY_EXTENSIONS` (defa
 ## Hard-won API lessons (verified live)
 
 - `api.spotify.com` is blocked from this client ("Failed to fetch"); the internal Platform APIs and `spclient.wg.spotify.com` work fine via CosmosAsync.
-- Rocket query/form guards match field names case-sensitively: always declare `#[field(name = "PascalCase")]`.
+- Rocket query/form guards match field names case-sensitively. The `CaseInsensitiveQuery` request fairing lowercases query keys before Rocket parses them, so query-backed `FromForm` fields must use lowercase names (for example, `#[field(name = "name")]`), even when clients send PascalCase Jellyfin parameters.
 - Playlist ops: create via `RootlistAPI.applyModification({operation:"create",createItemKind:1,name})`; add/remove/move via `PlaylistAPI.add/remove/move(uri, rows, {})` — the `{}` options argument is mandatory. Move anchors accept `"start"`, `"end"` or row objects with `uid`; a bare URI string silently degrades to move-to-top.
+- The live client's `PlaylistAPI.updateDetails` ignores `public`; it only updates name, description, and image. Spotify's UI changes playlist privacy through the `spotify.playlist_esperanto.proto.PlaylistService` `SetBasePermission` RPC, with permission `1` for private and `2` for public. Verify privacy mutations against the live client before relying on them.
 - Never hold a catalog lock across a bridge await; re-read playlists after mutations instead of predicting state.
 
 ## Container lessons
@@ -95,4 +96,5 @@ Spicetify plugins are env vars on `run-spotify.sh`: `SPICETIFY_EXTENSIONS` (defa
 
 ## Commit Conventions
 
+- Never create a commit unless the user explicitly requests it in the current turn.
 - Keep the commit subject short and specific. Use the commit body for a detailed explanation of what changed, why it was needed, and why the chosen implementation was used.
