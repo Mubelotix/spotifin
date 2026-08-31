@@ -92,10 +92,12 @@ fn audio_stream(
                     if complete_file {
                         break;
                     }
-                    // Nothing new; if the file shrank the recorder was reset.
+                    // Nothing new; if the file shrank the recorder was reset
+                    // for another capture. This request must not rewind into
+                    // that track's audio.
                     if let Ok(meta) = file.metadata().await {
                         if meta.len() < offset {
-                            offset = 0;
+                            break;
                         }
                     }
                     sleep(Duration::from_millis(250)).await

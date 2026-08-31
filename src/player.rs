@@ -108,14 +108,18 @@ const PLAY_JS: &str = r#"
     const parts = uri.split(":");
     if (parts[1] === "track") {
         try { Spicetify.Platform.History.push("/track/" + parts[2]); } catch (e) {}
-        await new Promise(r => setTimeout(r, 1200));
     }
     await Spicetify.Player.playUri(uri);
-    await new Promise(r => setTimeout(r, 2500));
+    return "started";
+})()
+"#;
+
+const VERIFY_PLAYBACK_JS: &str = r#"
+(async () => {
     const state = await Spicetify.Platform.PlayerAPI.getState();
     const current = state?.item?.uri ?? null;
-    if (current !== uri) throw new Error("playing " + current);
-    return state?.item?.name ?? "ok";
+    if (current !== URI_PLACEHOLDER) throw new Error("playing " + current);
+    return state?.item?.name ?? "unknown track";
 })()
 "#;
 
@@ -124,6 +128,19 @@ const PLAY_JS: &str = r#"
 async fn play_uri(bridge: &BridgeState, uri: &str) -> Result<String, String> {
     let literal = serde_json::to_string(uri).map_err(|e| e.to_string())?;
     let code = PLAY_JS.replace("URI_PLACEHOLDER", &literal);
+    match eval_on_bridge(bridge, code).await {
+        Ok(response) => Ok(response
+            .get("value")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown track")
+            .to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+async fn verify_playback(bridge: &BridgeState, uri: &str) -> Result<String, String> {
+    let literal = serde_json::to_string(uri).map_err(|e| e.to_string())?;
+    let code = VERIFY_PLAYBACK_JS.replace("URI_PLACEHOLDER", &literal);
     match eval_on_bridge(bridge, code).await {
         Ok(response) => Ok(response
             .get("value")
@@ -202,12 +219,24 @@ pub async fn prepare(
     }
 
     let previous_len = tokio::fs::metadata(recording).await.map(|m| m.len()).unwrap_or(0);
+    // Clear the old capture before Spotify starts the new track. Resetting
+    // after play has begun loses the intro while waiting for verification.
+    reset_recorder();
+    wait_recorder_restarted(recording, previous_len).await;
     match play_uri(&state.bridge, &uri).await {
         Ok(title) => {
+            let capture_start = Instant::now();
             eprintln!("now playing: {title}");
-            reset_recorder();
-            wait_recorder_restarted(recording, previous_len).await;
-            let min_end = Instant::now() + Duration::from_millis(duration_ms);
+            tokio::time::sleep(Duration::from_millis(2500)).await;
+            let title = match verify_playback(&state.bridge, &uri).await {
+                Ok(title) => title,
+                Err(error) => {
+                    eprintln!("could not verify playback of {uri}: {error}");
+                    return true;
+                }
+            };
+            eprintln!("verified now playing: {title}");
+            let min_end = capture_start + Duration::from_millis(duration_ms);
             let expected_bytes = capture_bytes_for_duration(duration_ms);
             *state.player.inner.session.lock().await =
                 Some(CaptureSession { item: item_id, min_end, expected_bytes });
@@ -220,6 +249,7 @@ pub async fn prepare(
                 item_id,
                 min_end,
                 expected_bytes,
+                state.player.clone(),
             ));
         }
         Err(error) => eprintln!("could not play {uri}: {error}"),
@@ -237,6 +267,7 @@ async fn save_to_cache(
     item_id: uuid::Uuid,
     ready_at: Instant,
     expected_bytes: u64,
+    control: PlayerControl,
 ) {
     while Instant::now() < ready_at {
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -251,6 +282,13 @@ async fn save_to_cache(
             break;
         }
         tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+    // Serialize the snapshot with recorder resets. Otherwise a later track
+    // can replace the shared file while this task still believes it is saving
+    // the previous capture.
+    let last_item = control.inner.last_item.lock().await;
+    if *last_item != Some(item_id) {
+        return;
     }
     let Ok(raw) = tokio::fs::read(&recording).await else {
         return;
