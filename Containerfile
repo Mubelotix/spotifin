@@ -34,6 +34,8 @@ COPY bridge.js /opt/spicetify/Extensions/bridge.js
 # then launch Spotify inside a D-Bus session (no session bus = 100% CPU busy loop)
 RUN printf '%s\n' \
         '#!/bin/bash' \
+        'exec 9>/tmp/spotify-autostart.lock' \
+        'flock -n 9 || exit 0' \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
         'ROCKET_ADDRESS=0.0.0.0 ROCKET_PORT=8000 AUDIO_DATA_DIR=/config/audio /usr/local/bin/spotify-server &' \
