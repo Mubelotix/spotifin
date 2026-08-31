@@ -173,6 +173,17 @@ pub fn base_item(catalog: &Catalog, item: &Item<'_>, playlist_item_id: Option<Uu
         Item::Album(album) => fill_album(catalog, &mut dto, album),
         Item::Playlist(playlist) => {
             dto.child_count = Some(playlist.entries.len());
+            dto.run_time_ticks = Some(
+                catalog
+                    .playlist_tracks(playlist)
+                    .iter()
+                    .filter_map(|item| match item {
+                        Item::Track(track) => Some(track.duration_ms),
+                        _ => None,
+                    })
+                    .sum::<u64>()
+                    * TICKS_PER_MS,
+            );
             dto.image_tags = image_tag(&playlist.image);
         }
         Item::Artist(_) => {
