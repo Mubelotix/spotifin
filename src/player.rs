@@ -18,6 +18,7 @@ struct PlayerInner {
     switch_generation: AtomicU64,
     last_switch: Mutex<Option<Instant>>,
     requested_item: Mutex<Option<uuid::Uuid>>,
+    interrupted_item: Mutex<Option<uuid::Uuid>>,
     session: Mutex<Option<CaptureSession>>,
     switching: Mutex<bool>,
     live_streams: AtomicUsize,
@@ -69,12 +70,48 @@ impl PlayerControl {
         }
     }
 
+    /// Ends the capture that Spotify is currently producing before an autoplay
+    /// station is started. The station's first track must begin in a fresh
+    /// recording rather than being appended to the interrupted track.
+    pub async fn interrupt_for_mix(&self, item: uuid::Uuid, recording: &std::path::Path) {
+        self.inner.switch_generation.fetch_add(1, Ordering::AcqRel);
+        *self.inner.session.lock().await = None;
+        *self.inner.last_item.lock().await = None;
+        *self.inner.requested_item.lock().await = None;
+        *self.inner.interrupted_item.lock().await = Some(item);
+        let previous_len = tokio::fs::metadata(recording).await.map(|m| m.len()).unwrap_or(0);
+        reset_recorder();
+        wait_recorder_restarted(recording, previous_len).await;
+        eprintln!("interrupted current capture for autoplay mix");
+    }
+
+    /// Records the track Spotify selected for a station. Jellyfin clients may
+    /// continue requesting the item that was selected before the mix started;
+    /// those stale requests must not retune Spotify or consume this capture.
+    pub async fn adopt_mix_item(&self, item: uuid::Uuid, duration_ms: u64) {
+        let expected_bytes = capture_bytes_for_duration(duration_ms);
+        *self.inner.session.lock().await = Some(CaptureSession {
+            item,
+            min_end: Instant::now() + Duration::from_millis(duration_ms),
+            expected_bytes,
+        });
+        *self.inner.last_item.lock().await = Some(item);
+    }
+
     /// Capture plan for `item`, if it is the one being recorded.
     pub async fn session_for(&self, item: uuid::Uuid) -> Option<CaptureSession> {
         match self.inner.session.lock().await.as_ref() {
             Some(session) if session.item == item => Some(*session),
             _ => None,
         }
+    }
+
+    pub async fn active_session(&self) -> Option<CaptureSession> {
+        *self.inner.session.lock().await
+    }
+
+    pub async fn interrupted_item(&self) -> Option<uuid::Uuid> {
+        *self.inner.interrupted_item.lock().await
     }
 
     pub(crate) fn stream_started(&self) {
@@ -229,6 +266,18 @@ pub async fn prepare(
         return false;
     };
 
+    // An autoplay mix can change Spotify independently of the Jellyfin client.
+    // Do not switch Spotify back to the interrupted item when its stale request
+    // arrives; the audio endpoint rejects that request instead.
+    if !probe
+        && state.player.interrupted_item().await == Some(item_id)
+        && state.player.active_session().await.is_some_and(|session| {
+            session.item != item_id && Instant::now() < session.min_end
+        })
+    {
+        return false;
+    }
+
     let mut last = state.player.inner.last_item.lock().await;
     if generation.is_some_and(|generation| {
         state.player.inner.switch_generation.load(Ordering::Acquire) != generation
@@ -301,7 +350,7 @@ pub async fn prepare(
                 Err(error) => {
                     eprintln!("could not verify playback of {uri}: {error}");
                     *switching = false;
-                    return true;
+                    return false;
                 }
             };
             if generation.is_some_and(|generation| {

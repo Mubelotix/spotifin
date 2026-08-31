@@ -332,10 +332,62 @@ const AUTOPLAY_JS: &str = r#"
             ? "spotify:station:track:" + seed.slice("spotify:track:".length)
             : seed;
         await Spicetify.Player.playUri(station);
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // The station may expose its first item before its recommendation page
+        // has been materialized in either queue representation.
+        // Stay below Wavio's 15-second Jellyfin request timeout.
+        for (let attempt = 0; attempt < 16; attempt++) {
+            const currentUri = Spicetify.Player.data?.item?.uri;
+            const queue = await new Promise(resolve => {
+                let settled = false;
+                const finish = value => {
+                    if (settled) return;
+                    settled = true;
+                    resolve(value);
+                };
+                setTimeout(() => finish(null), 250);
+                try { Spicetify.Platform.PlayerAPI._contextPlayer.getQueue({}, finish); }
+                catch (e) { finish(null); }
+            });
+            const hasDifferentTrack = queue?.nextTracks?.some(entry =>
+                entry.contextTrack?.uri?.startsWith("spotify:track:") &&
+                entry.contextTrack.uri !== currentUri);
+            if (hasDifferentTrack) break;
+            await new Promise(resolve => setTimeout(resolve, 250));
+        }
     }
-    const tracks = Spicetify.Player.data?.nextItems || [];
-    return JSON.stringify(tracks.filter(t => t?.type === "track" && t?.uri).map(t => ({
+    const current = Spicetify.Player.data?.item;
+    const queue = await new Promise(resolve => {
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+        };
+        setTimeout(() => finish(null), 1000);
+        try { Spicetify.Platform.PlayerAPI._contextPlayer.getQueue({}, finish); }
+        catch (e) { finish(null); }
+    });
+    const contextNext = (queue?.nextTracks || []).map(entry => {
+        const t = entry.contextTrack;
+        const m = t?.metadata || {};
+        return t?.uri ? {
+            type: "track", uri: t.uri, uid: t.uid ?? null,
+            name: m.title ?? null,
+            album: m.album_uri ? { uri: m.album_uri, name: m.album_title ?? null,
+                image: m.image_url ?? null } : null,
+            artists: m.artist_uri ? [{ uri: m.artist_uri, name: m.artist_name ?? null }] : [],
+            duration: { milliseconds: Number(m.duration) || 0 },
+            discNumber: Number(m.album_disc_number) || 0,
+            trackNumber: Number(m.album_track_number) || 0
+        } : null;
+    }).filter(t => t && t.uri !== current?.uri);
+    const tracks = [current, ...contextNext];
+    const seen = new Set();
+    return JSON.stringify(tracks.filter(t => {
+        if (t?.type !== "track" || !t?.uri?.startsWith("spotify:track:") || seen.has(t.uri)) return false;
+        seen.add(t.uri);
+        return true;
+    }).map(t => ({
         uri: t.uri,
         name: t.name ?? null,
         album: t.album ? {

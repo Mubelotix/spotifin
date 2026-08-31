@@ -341,6 +341,10 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
             _ => None,
         }
     };
+    // Starting a Spotify station interrupts the track currently being captured.
+    // Drop its capture before Spotify begins emitting the station's first item,
+    // otherwise the shared recording can contain both tracks.
+    state.player.interrupt_for_mix(item_id, &state.audio.recording).await;
     // Seed Spotify so its recommendation engine owns the mix and provides the
     // ordered next tracks through the renderer's player state.
     let autoplay = crate::spotify::autoplay_tracks(&state.bridge, seed_uri.as_deref())
@@ -348,9 +352,20 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
         .unwrap_or_default();
 
     if !autoplay.is_empty() {
-        let mut catalog = state.catalog.write().unwrap();
-        for track in autoplay.iter().take(limit) {
-            crate::spotify::ingest_track(&mut catalog, track);
+        let first_mix_item = autoplay.first().and_then(|track| {
+            Some((
+                crate::catalog::stable_id(track.get("uri")?.as_str()?),
+                track.get("ms")?.as_u64()?,
+            ))
+        });
+        {
+            let mut catalog = state.catalog.write().unwrap();
+            for track in autoplay.iter().take(limit) {
+                crate::spotify::ingest_track(&mut catalog, track);
+            }
+        }
+        if let Some((id, duration_ms)) = first_mix_item {
+            state.player.adopt_mix_item(id, duration_ms).await;
         }
     }
 
@@ -363,16 +378,12 @@ pub async fn instant_mix(item_id: Uuid, query: ItemQuery, state: &State<AppState
             .into_iter()
             .collect()
     } else {
-        let mut ids = autoplay
+        let ids = autoplay
             .iter()
             .take(limit)
             .filter_map(|raw| raw.get("uri").and_then(Value::as_str))
             .map(crate::catalog::stable_id)
             .collect::<Vec<_>>();
-        if let Some(seed_uri) = seed_uri.as_deref() {
-            ids.insert(0, crate::catalog::stable_id(seed_uri));
-            ids.truncate(limit);
-        }
         ids.into_iter()
             .filter_map(|id| catalog.tracks.get(&id).map(crate::catalog::Item::Track))
             .collect()

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -216,25 +217,37 @@ async fn open_audio_stream(
         return Err(rocket::http::Status::NotFound);
     }
     let explicit_range = range.0.is_some();
-    if let Some((path, len)) = cached_capture(state, id).await {
-        // Complete file on disk: no client interaction, serve the whole thing
-        // or any requested slice of it.
-        state.player.note_activity();
-        let window = range
-            .0
-            .and_then(|header| parse_range(&header, len))
-            .map(|(start, end)| (start, end, len))
-            .or(Some((0, len.saturating_sub(1), len)));
-        return Ok(audio_stream(
-            Arc::new(path),
-            state.player.clone(),
-            false,
-            None,
-            window,
-            window.map(|(start, end, _)| end - start + 1),
-            true,
-            explicit_range,
-        ));
+    let active_capture = state.player.active_session().await;
+    let interrupted_item = state.player.interrupted_item().await;
+    if interrupted_item == Some(id)
+        && active_capture.is_some_and(|capture| capture.item != id && Instant::now() < capture.min_end)
+    {
+        // The client still displays the track that the mix interrupted. Never
+        // serve the mix track under that old item ID.
+        eprintln!("stale audio rejected: requested={id} active={} interrupted={id}", active_capture.unwrap().item);
+        return Err(rocket::http::Status::Conflict);
+    }
+    if active_capture.is_none_or(|capture| capture.item == id || interrupted_item != Some(id)) {
+        if let Some((path, len)) = cached_capture(state, id).await {
+            // Complete file on disk: no client interaction, serve the whole file
+            // or any requested slice of it.
+            state.player.note_activity();
+            let window = range
+                .0
+                .and_then(|header| parse_range(&header, len))
+                .map(|(start, end)| (start, end, len))
+                .or(Some((0, len.saturating_sub(1), len)));
+            return Ok(audio_stream(
+                Arc::new(path),
+                state.player.clone(),
+                false,
+                None,
+                window,
+                window.map(|(start, end, _)| end - start + 1),
+                true,
+                explicit_range,
+            ));
+        }
     }
     // Linthra probes a selected and several speculative tracks with the same
     // `bytes=0-1` request. A probe must not retune the shared Spotify player:
@@ -273,6 +286,12 @@ async fn open_audio_stream(
     }
 
     let session = state.player.session_for(id).await;
+    if session.is_none() {
+        // A normal live stream must be tied to a capture session so an
+        // interruption can stop it before the shared recorder contains the
+        // next track. Never expose an untracked recording as this item.
+        return Err(rocket::http::Status::Conflict);
+    }
     let total = match &session {
         Some(capture) => capture.expected_bytes,
         None => tokio::fs::metadata(state.audio.recording.as_ref()).await.map(|m| m.len()).unwrap_or(0),
