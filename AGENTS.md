@@ -9,8 +9,14 @@ The supported Jellyfin music clients are:
 - **Finamp**: https://github.com/finamp-app/finamp
 - **Fintunes**: https://github.com/leinelissen/jellyfin-audio-player
 - **Yuzic**: https://github.com/eftpmc/yuzic
+- **CassetteCat**: https://github.com/samyyy2311/CassetteCat
 
-They can point at this server, browse the Spotify account like a local library (playlists, Liked Songs, saved albums, followed artists), search **all of Spotify**, and play tracks with correct lengths, seeking, favorites, playlists and lyrics. Agents may freely clone these repositories when they need to inspect client behavior, request formats, or compatibility expectations.
+They can point at this server, browse the Spotify account like a local library (playlists, Liked Songs, saved albums, followed artists), and play tracks with correct lengths, seeking, favorites, playlists and lyrics. Finamp, Fintunes and Yuzic also search **all of Spotify** through the server's remote search path. Agents may freely clone these repositories when they need to inspect client behavior, request formats, or compatibility expectations.
+
+CassetteCat's Jellyfin integration downloads the server's audio library and performs
+search locally; it does not send Jellyfin `SearchTerm` requests. Consequently, its
+search and artist counts only cover tracks already present in the server catalog,
+unlike the other clients' remote Spotify search and artist-discography paths.
 
 Core idea: the backend never talks to spotify.com. It drives the logged-in client from inside its own renderer (via a WebSocket to the `bridge.js` Spicetify extension) using the same internal APIs the UI uses — indistinguishable from a human clicking around.
 

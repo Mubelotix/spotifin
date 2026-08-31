@@ -6,6 +6,7 @@ controllers and DTOs, and on actual client code from:
 
 - `finamp-app/Finamp`
 - `leinelissen/jellyfin-audio-player`
+- `samyyy2311/CassetteCat`
 
 The repositories were cloned under `/tmp/target-research/`. This is a behavioral
 target, not a copy of Jellyfin's internal implementation. The server API is
@@ -25,6 +26,12 @@ An implementation should support, in this order:
 Finamp is the more complete reference client. The React Native
 `jellyfin-audio-player` (called Fintunes in its request headers) confirms the
 minimal subset needed for a practical music player.
+
+CassetteCat is an Android Jellyfin client that loads audio items through
+`/Users/{userId}/Items` and filters the resulting library locally. It does not
+use Jellyfin's `SearchTerm` or `/Search/Hints` endpoints, so its search cannot
+discover tracks that have not already been returned by the initial library
+enumeration.
 
 ## HTTP Conventions
 
