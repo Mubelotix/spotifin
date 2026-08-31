@@ -53,6 +53,13 @@ impl PlayerControl {
         *self.inner.requested_item.lock().await = Some(item);
     }
 
+    pub async fn clear_requested(&self, item: uuid::Uuid) {
+        let mut requested = self.inner.requested_item.lock().await;
+        if *requested == Some(item) {
+            *requested = None;
+        }
+    }
+
     /// Capture plan for `item`, if it is the one being recorded.
     pub async fn session_for(&self, item: uuid::Uuid) -> Option<CaptureSession> {
         match self.inner.session.lock().await.as_ref() {
@@ -224,7 +231,7 @@ pub async fn prepare(
         return false;
     }
     let requested = *state.player.inner.requested_item.lock().await;
-    if probe && requested.is_some_and(|requested| requested != item_id) {
+    if requested.is_some_and(|requested| requested != item_id) {
         return false;
     }
     let still_capturing = state
@@ -240,9 +247,7 @@ pub async fn prepare(
     // current stream contain the wrong track. A real skip closes the old
     // stream first, so use that boundary rather than blocking for the song's
     // full duration.
-    if *last != Some(item_id)
-        && state.player.has_live_stream()
-    {
+    if *last != Some(item_id) && state.player.has_live_stream() && probe {
         return false;
     }
     // Native players probe several queued URLs immediately after a selection.

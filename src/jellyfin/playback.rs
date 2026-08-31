@@ -81,7 +81,10 @@ pub fn playing_progress(state: &State<AppState>, body: Json<Value>) {
 }
 
 #[post("/Sessions/Playing/Stopped", data = "<body>")]
-pub fn playing_stopped(state: &State<AppState>, body: Json<Value>) {
+pub async fn playing_stopped(state: &State<AppState>, body: Json<Value>) {
+    if let Some(item) = body.get("ItemId").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+        state.player.clear_requested(item).await;
+    }
     record(state, &body, Report::Stop);
 }
 
