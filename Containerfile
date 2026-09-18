@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ARG SPICETIFY_VERSION=2.44.0
+ENV SPICETIFY_EXTENSIONS="adblock.js bridge.js"
 RUN curl -fsSL -o /tmp/spicetify.tar.gz \
         https://github.com/spicetify/cli/releases/download/v${SPICETIFY_VERSION}/spicetify-${SPICETIFY_VERSION}-linux-amd64.tar.gz \
     && mkdir -p /opt/spicetify \
@@ -80,6 +81,7 @@ RUN mkdir -p /custom-cont-init.d \
         'rm -rf /config/.cache/spotify/pending' \
         'rm -f /config/.cache/spotify/Singleton*' \
         'mkdir -p /config/.config/spotify "$SPICETIFY_CONFIG/Extensions" /config/.config/openbox' \
+        'chown -R abc:abc "$SPICETIFY_CONFIG" 2>/dev/null || true' \
         'cat /defaults/autostart > /config/.config/openbox/autostart' \
         'chown abc:abc /config/.config/openbox/autostart' \
         'mkdir -p /config/audio/hls' \
@@ -117,7 +119,6 @@ RUN mkdir -p /custom-cont-init.d \
         'done' \
         'APPLIED_DIR=/usr/share/spotify/Apps/xpui/extensions' \
         'for ext in $SPICETIFY_EXTENSIONS; do if [ ! -f "$APPLIED_DIR/$ext" ]; then echo "$ext missing from applied app, forcing apply"; CHANGED=1; fi; done' \
-        'chown -R abc:abc "$SPICETIFY_CONFIG" 2>/dev/null || true' \
         'if [ "$CHANGED" = 1 ]; then' \
         '    su abc -s /bin/bash -c "HOME=$SPICETIFY_HOME SPICETIFY_CONFIG=$SPICETIFY_CONFIG spicetify apply" || true' \
         'fi' \
