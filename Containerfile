@@ -20,6 +20,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Spotify's password login can hand off to a host browser that is unavailable
+# inside Selkies. Preserve the one-time URL so it can be opened externally.
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        'umask 077' \
+        'printf "%s\\n" "$1" > /config/spotify-login-url' \
+        > /usr/local/bin/spotify-login-url \
+    && printf '%s\n' \
+        '#!/bin/sh' \
+        'case "$1" in' \
+        '    http://*|https://*) exec /usr/local/bin/spotify-login-url "$1" ;;' \
+        '    *) exec /usr/bin/xdg-open "$@" ;;' \
+        'esac' \
+        > /usr/local/bin/xdg-open \
+    && printf '%s\n' \
+        '#!/bin/sh' \
+        'if [ "$1" = open ]; then' \
+        '    case "$2" in' \
+        '        http://*|https://*) exec /usr/local/bin/spotify-login-url "$2" ;;' \
+        '    esac' \
+        'fi' \
+        'exec /usr/bin/gio "$@"' \
+        > /usr/local/bin/gio \
+    && chmod +x /usr/local/bin/spotify-login-url /usr/local/bin/xdg-open /usr/local/bin/gio
+
 ARG SPICETIFY_VERSION=2.44.0
 ENV SPICETIFY_EXTENSIONS="adblock.js bridge.js"
 RUN curl -fsSL -o /tmp/spicetify.tar.gz \

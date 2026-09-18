@@ -55,6 +55,16 @@ To make files in `data` owned by a specific host user, also add `-e PUID=... -e 
 3. Wait for the library collector to finish its first pass.
 4. Configure your Jellyfin client with `http://<host>:8032`.
 
+### Browser Login
+
+If Spotify's password login opens an external browser that is unavailable in
+the container, its one-time login URL is written to `/config/spotify-login-url`.
+Open that URL on a browser where you can sign in, then return to Spotify:
+
+```bash
+docker exec spotifin cat /config/spotify-login-url
+```
+
 > [!WARNING]
 > The included authentication is intentionally minimal. Keep it on a trusted network or place it behind your own firewall, reverse proxy, and authentication layer before exposing it to the internet.
 
